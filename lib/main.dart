@@ -3202,7 +3202,7 @@ List<OverviewFilter> visibleOverviewFilters(List<WalletCard> cards) {
   ];
 }
 
-class OverviewCardGrid extends StatelessWidget {
+class OverviewCardGrid extends StatefulWidget {
   const OverviewCardGrid({
     required this.cards,
     required this.bundle,
@@ -3217,35 +3217,87 @@ class OverviewCardGrid extends StatelessWidget {
   final VoidCallback onAdd;
 
   @override
+  State<OverviewCardGrid> createState() => _OverviewCardGridState();
+}
+
+class _OverviewCardGridState extends State<OverviewCardGrid> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (cards.isEmpty) {
-      return OverviewEmptyState(onAdd: onAdd);
+    if (widget.cards.isEmpty) {
+      return OverviewEmptyState(onAdd: widget.onAdd);
     }
 
     return LayoutBuilder(
       key: const ValueKey('overview-card-grid'),
       builder: (context, constraints) {
-        final tileWidth = (constraints.maxWidth - 12) / 2;
+        const spacing = 12.0;
+        const addButtonWidth = 72.0;
+        final gridWidth = constraints.maxWidth - addButtonWidth - spacing;
+        final tileWidth = (gridWidth - spacing) / 2;
         final tileHeight = tileWidth / 1.85;
+        final rowCount = (widget.cards.length / 2).ceil();
+        final scrollable = widget.cards.length > 5;
+        final visibleRows = scrollable ? 2.55 : rowCount.toDouble();
+        final visibleGaps = scrollable ? 2 : math.max(0, rowCount - 1);
+        final gridHeight = tileHeight * visibleRows + spacing * visibleGaps;
 
-        return Wrap(
-          spacing: 12,
-          runSpacing: 12,
+        final cardGrid = Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
           children: [
-            for (final card in cards)
+            for (final card in widget.cards)
               SizedBox(
                 width: tileWidth,
                 height: tileHeight,
                 child: OverviewCardTile(
                   card: card,
-                  template: bundle.templateFor(card.type),
-                  onView: () => onView(card, bundle.templateFor(card.type)),
+                  template: widget.bundle.templateFor(card.type),
+                  onView:
+                      () => widget.onView(
+                        card,
+                        widget.bundle.templateFor(card.type),
+                      ),
                 ),
               ),
+          ],
+        );
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: gridHeight,
+                child:
+                    scrollable
+                        ? Scrollbar(
+                          controller: _scrollController,
+                          thumbVisibility: true,
+                          child: SingleChildScrollView(
+                            key: const ValueKey('overview-card-scroll'),
+                            controller: _scrollController,
+                            child: cardGrid,
+                          ),
+                        )
+                        : cardGrid,
+              ),
+            ),
+            const SizedBox(width: spacing),
             SizedBox(
-              width: tileWidth,
-              height: tileHeight,
-              child: AddCardButton(onPressed: onAdd),
+              width: addButtonWidth,
+              height: gridHeight,
+              child: Align(
+                alignment: Alignment.center,
+                child: AddCardButton(onPressed: widget.onAdd),
+              ),
             ),
           ],
         );

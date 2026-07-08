@@ -55,7 +55,14 @@ void main() {
       'demo-driving-license',
     ]);
     expect(find.byType(OverviewCardTile), findsNWidgets(6));
+    expect(find.byKey(const ValueKey('overview-card-scroll')), findsOneWidget);
     expect(find.byKey(const ValueKey('overview-add-card')), findsOneWidget);
+    expect(
+      tester.getCenter(find.byKey(const ValueKey('overview-add-card'))).dx,
+      greaterThan(
+        tester.getCenter(find.byKey(const ValueKey('overview-card-scroll'))).dx,
+      ),
+    );
     expect(
       tester
           .getTopLeft(
