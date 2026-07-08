@@ -506,6 +506,8 @@ void main() {
     expect(find.text('Wallet Settings'), findsOneWidget);
     expect(find.text('Connection status'), findsOneWidget);
     expect(find.text('add/remove items'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close settings'));
+    await tester.pumpAndSettle();
   });
 }
 
