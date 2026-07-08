@@ -650,6 +650,10 @@ class _CardDetailSheetState extends State<CardDetailSheet> {
     );
   }
 
+  void _zoomImage(String image) {
+    showCardImageZoom(context, image);
+  }
+
   @override
   Widget build(BuildContext context) {
     final images = _card.images.take(4).toList();
@@ -701,13 +705,21 @@ class _CardDetailSheetState extends State<CardDetailSheet> {
                     Center(
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 360),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: AspectRatio(
-                            aspectRatio: 1.58,
-                            child: Image.asset(
-                              _card.primaryImage,
-                              fit: BoxFit.cover,
+                        child: Tooltip(
+                          message: 'Zoom main image',
+                          child: GestureDetector(
+                            key: ValueKey('zoom-card-main-image-${_card.id}'),
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _zoomImage(_card.primaryImage),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: AspectRatio(
+                                aspectRatio: 1.58,
+                                child: Image.asset(
+                                  _card.primaryImage,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
                             ),
                           ),
                         ),
@@ -939,10 +951,18 @@ class _CardImagePreviewSheetState extends State<CardImagePreviewSheet> {
             ),
             const SizedBox(height: 16),
             Expanded(
-              child: Center(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Image.asset(widget.image, fit: BoxFit.contain),
+              child: Tooltip(
+                message: 'Zoom image',
+                child: GestureDetector(
+                  key: ValueKey('zoom-preview-image-${widget.card.id}'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => showCardImageZoom(context, widget.image),
+                  child: Center(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Image.asset(widget.image, fit: BoxFit.contain),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -978,6 +998,73 @@ class _CardImagePreviewSheetState extends State<CardImagePreviewSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+Future<void> showCardImageZoom(BuildContext context, String image) {
+  return Navigator.of(context, rootNavigator: true).push<void>(
+    MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (context) => CardImageZoomView(image: image),
+    ),
+  );
+}
+
+class CardImageZoomView extends StatelessWidget {
+  const CardImageZoomView({required this.image, super.key});
+
+  final String image;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return InteractiveViewer(
+                  key: const ValueKey('card-image-zoom-viewer'),
+                  minScale: 1,
+                  maxScale: 6,
+                  boundaryMargin: const EdgeInsets.all(160),
+                  child: SizedBox(
+                    width: constraints.maxWidth,
+                    height: constraints.maxHeight,
+                    child: Center(
+                      child: Image.asset(
+                        key: ValueKey('zoom-image-$image'),
+                        image,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: IconButton.filled(
+                  tooltip: 'Close zoom',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AkatorColors.backgroundNorm,
+                    foregroundColor: AkatorColors.textNorm,
+                    fixedSize: const Size(52, 52),
+                  ),
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
