@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:akator_wallet/main.dart';
+import 'package:akator_wallet/wallet_card_store.dart';
 
 void main() {
   testWidgets('opens the draft menu and settings drawers', (tester) async {
@@ -28,8 +29,137 @@ void main() {
     expect(find.text('Explore: Security & Data'), findsOneWidget);
     expect(find.byIcon(Icons.refresh_rounded), findsNothing);
     expect(find.byTooltip('Cycle favorite card'), findsNothing);
+    expectOverviewFilterMapping();
+    expect(find.text('card 01'), findsNothing);
+    expect(find.text('card 02'), findsNothing);
+    expect(find.text('passport/IDs'), findsOneWidget);
+    expect(find.text('credit/debit cards'), findsOneWidget);
+    expect(find.text('student IDs'), findsOneWidget);
+    expect(find.text('health insurance'), findsOneWidget);
+    expect(find.text('loyalty cards'), findsOneWidget);
+    expect(find.text('driver licenses'), findsOneWidget);
+    expect(visibleOverviewFilterIds(tester), [
+      'passport_id',
+      'credit_debit_cards',
+      'student_ids',
+      'health_insurance',
+      'loyalty_cards',
+      'driver_licenses',
+    ]);
+    expect(overviewCardIds(tester), [
+      'demo-credit-card',
+      'demo-student-id',
+      'demo-personal-id',
+      'demo-health-insurance',
+      'demo-loyalty-card',
+      'demo-driving-license',
+    ]);
+    expect(find.byType(OverviewCardTile), findsNWidgets(6));
+    expect(find.byKey(const ValueKey('overview-add-card')), findsOneWidget);
+    expect(
+      tester
+          .getTopLeft(
+            find.byKey(const ValueKey('view-overview-card-demo-credit-card')),
+          )
+          .dy,
+      moreOrLessEquals(
+        tester
+            .getTopLeft(
+              find.byKey(const ValueKey('view-overview-card-demo-student-id')),
+            )
+            .dy,
+      ),
+    );
+    expect(
+      tester
+          .getTopLeft(
+            find.byKey(const ValueKey('view-overview-card-demo-loyalty-card')),
+          )
+          .dy,
+      moreOrLessEquals(
+        tester
+            .getTopLeft(
+              find.byKey(
+                const ValueKey('view-overview-card-demo-driving-license'),
+              ),
+            )
+            .dy,
+      ),
+    );
 
-    await tester.tap(
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('overview-filter-credit_debit_cards')),
+    );
+    await tester.pumpAndSettle();
+    expect(overviewCardIds(tester), ['demo-credit-card']);
+
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('overview-filter-health_insurance')),
+    );
+    await tester.pumpAndSettle();
+    expect(overviewCardIds(tester), [
+      'demo-credit-card',
+      'demo-health-insurance',
+    ]);
+
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('overview-filter-credit_debit_cards')),
+    );
+    await tester.pumpAndSettle();
+    expect(overviewCardIds(tester), ['demo-health-insurance']);
+
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('overview-filter-health_insurance')),
+    );
+    await tester.pumpAndSettle();
+    expect(overviewCardIds(tester), [
+      'demo-credit-card',
+      'demo-student-id',
+      'demo-personal-id',
+      'demo-health-insurance',
+      'demo-loyalty-card',
+      'demo-driving-license',
+    ]);
+
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('overview-filter-passport_id')),
+    );
+    await tester.pumpAndSettle();
+    expect(overviewCardIds(tester), ['demo-personal-id']);
+
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('overview-filter-student_ids')),
+    );
+    await tester.pumpAndSettle();
+    expect(overviewCardIds(tester), ['demo-student-id', 'demo-personal-id']);
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('overview-filter-credit_debit_cards')),
+    );
+    await tester.pumpAndSettle();
+    expect(overviewCardIds(tester), [
+      'demo-credit-card',
+      'demo-student-id',
+      'demo-personal-id',
+    ]);
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('view-overview-card-demo-credit-card')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(CardDetailSheet), findsOneWidget);
+    expect(find.text('Card number'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close card view'));
+    await tester.pumpAndSettle();
+
+    await tapVisible(
+      tester,
       find.byKey(const ValueKey('view-card-image-demo-credit-card')),
     );
     await tester.pumpAndSettle();
@@ -189,13 +319,40 @@ void main() {
       ),
       findsOneWidget,
     );
+    expect(
+      tester.widget<SaveChangesButton>(find.byType(SaveChangesButton)).saved,
+      isFalse,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(SaveChangesButton),
+        matching: find.byIcon(Icons.check_rounded),
+      ),
+      findsNothing,
+    );
+
+    await tester.tap(find.byType(SaveChangesButton));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<SaveChangesButton>(find.byType(SaveChangesButton)).saved,
+      isTrue,
+    );
+
+    await tester.tap(find.byType(SaveChangesButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Changes already saved'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
+    expect(find.text('Changes already saved'), findsNothing);
 
     await tester.tap(find.byTooltip('Close editor'));
     await tester.pumpAndSettle();
     expect(find.text('John Doe'), findsNothing);
     expect(findAssetImage('assets/cards/credit_card_2.png'), findsWidgets);
 
-    await tester.tap(
+    await tapVisible(
+      tester,
       find.byKey(const ValueKey('view-card-image-demo-credit-card')),
     );
     await tester.pumpAndSettle();
@@ -231,11 +388,67 @@ void main() {
     await tester.tap(find.byTooltip('Close card view'));
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byType(PageView), const Offset(-500, 0));
+    await tester.drag(
+      find.byKey(const ValueKey('favorites-card-carousel')),
+      const Offset(-500, 0),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Campus ID'), findsWidgets);
     expect(find.text('Student ID'), findsWidgets);
     expect(find.text('Akator Academy'), findsNothing);
+
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('overview-filter-credit_debit_cards')),
+    );
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('overview-filter-passport_id')),
+    );
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('overview-filter-student_ids')),
+    );
+    await tester.pumpAndSettle();
+    expect(overviewCardIds(tester), [
+      'demo-credit-card',
+      'demo-student-id',
+      'demo-personal-id',
+      'demo-health-insurance',
+      'demo-loyalty-card',
+      'demo-driving-license',
+    ]);
+
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('view-overview-card-demo-health-insurance')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(CardDetailSheet), findsOneWidget);
+    expect(find.text('Provider'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Edit Medicare Sample'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit Medicare Sample'), findsOneWidget);
+    expect(find.text('Delete card'), findsOneWidget);
+
+    await tester.tap(find.text('Delete card'));
+    await tester.pumpAndSettle();
+    expect(find.text('Are you sure to delete the card?'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+    expect(overviewCardIds(tester), [
+      'demo-credit-card',
+      'demo-student-id',
+      'demo-personal-id',
+      'demo-loyalty-card',
+      'demo-driving-license',
+    ]);
+    expect(
+      find.byKey(const ValueKey('overview-filter-health_insurance')),
+      findsNothing,
+    );
 
     await tester.ensureVisible(find.byTooltip('Collapse Section 3'));
     await tester.pumpAndSettle();
@@ -273,4 +486,47 @@ Finder findAssetImage(String assetName) {
         widget.image is AssetImage &&
         (widget.image as AssetImage).assetName == assetName,
   );
+}
+
+List<String> overviewCardIds(WidgetTester tester) {
+  final grid = find.byType(OverviewCardGrid);
+  if (grid.evaluate().isEmpty) {
+    return [];
+  }
+
+  return tester
+      .widget<OverviewCardGrid>(grid)
+      .cards
+      .map((card) => card.id)
+      .toList();
+}
+
+List<String> visibleOverviewFilterIds(WidgetTester tester) {
+  return tester
+      .widgetList<OverviewFilterChip>(find.byType(OverviewFilterChip))
+      .map((chip) => chip.filter.id)
+      .toList();
+}
+
+void expectOverviewFilterMapping() {
+  final filters = {for (final filter in overviewFilters) filter.id: filter};
+
+  expect(filters['passport_id']!.matchedTypes, {WalletCardType.personalId});
+  expect(filters['credit_debit_cards']!.matchedTypes, {
+    WalletCardType.creditCard,
+  });
+  expect(filters['student_ids']!.matchedTypes, {WalletCardType.studentId});
+  expect(filters['health_insurance']!.matchedTypes, {
+    WalletCardType.healthInsurance,
+  });
+  expect(filters['loyalty_cards']!.matchedTypes, {WalletCardType.loyaltyCard});
+  expect(filters['driver_licenses']!.matchedTypes, {
+    WalletCardType.drivingLicense,
+  });
+}
+
+Future<void> tapVisible(WidgetTester tester, Finder finder) async {
+  await tester.ensureVisible(finder);
+  await tester.pumpAndSettle();
+  await tester.tap(finder);
 }
