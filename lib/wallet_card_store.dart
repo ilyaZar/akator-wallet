@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 
 enum WalletCardType {
   creditCard('credit_card'),
+  healthInsurance('health_insurance'),
+  loyaltyCard('loyalty_card'),
   personalId('personal_id'),
   drivingLicense('driving_license'),
   studentId('student_id');

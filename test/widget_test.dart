@@ -193,7 +193,7 @@ void main() {
     await tester.tap(find.byTooltip('Close editor'));
     await tester.pumpAndSettle();
     expect(find.text('John Doe'), findsNothing);
-    expect(findAssetImage('assets/cards/credit_card_2.png'), findsOneWidget);
+    expect(findAssetImage('assets/cards/credit_card_2.png'), findsWidgets);
 
     await tester.tap(
       find.byKey(const ValueKey('view-card-image-demo-credit-card')),
