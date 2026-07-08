@@ -3239,9 +3239,7 @@ class _OverviewCardGridState extends State<OverviewCardGrid> {
       key: const ValueKey('overview-card-grid'),
       builder: (context, constraints) {
         const spacing = 12.0;
-        const addButtonWidth = 72.0;
-        final gridWidth = constraints.maxWidth - addButtonWidth - spacing;
-        final tileWidth = (gridWidth - spacing) / 2;
+        final tileWidth = (constraints.maxWidth - spacing) / 2;
         final tileHeight = tileWidth / 1.85;
         final rowCount = (widget.cards.length / 2).ceil();
         final scrollable = widget.cards.length > 5;
@@ -3270,34 +3268,28 @@ class _OverviewCardGridState extends State<OverviewCardGrid> {
           ],
         );
 
-        return Row(
+        return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: SizedBox(
-                height: gridHeight,
-                child:
-                    scrollable
-                        ? Scrollbar(
-                          controller: _scrollController,
-                          thumbVisibility: true,
-                          child: SingleChildScrollView(
-                            key: const ValueKey('overview-card-scroll'),
-                            controller: _scrollController,
-                            child: cardGrid,
-                          ),
-                        )
-                        : cardGrid,
-              ),
-            ),
-            const SizedBox(width: spacing),
             SizedBox(
-              width: addButtonWidth,
               height: gridHeight,
-              child: Align(
-                alignment: Alignment.center,
-                child: AddCardButton(onPressed: widget.onAdd),
-              ),
+              child:
+                  scrollable
+                      ? Scrollbar(
+                        controller: _scrollController,
+                        thumbVisibility: true,
+                        child: SingleChildScrollView(
+                          key: const ValueKey('overview-card-scroll'),
+                          controller: _scrollController,
+                          child: cardGrid,
+                        ),
+                      )
+                      : cardGrid,
+            ),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: AddCardButton(onPressed: widget.onAdd),
             ),
           ],
         );
@@ -3753,17 +3745,28 @@ class AddCardButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return FilledButton(
       key: const ValueKey('overview-add-card'),
-      child: IconButton.filled(
-        tooltip: 'Add card',
-        style: IconButton.styleFrom(
-          fixedSize: const Size(58, 58),
-          backgroundColor: AkatorColors.primaryStrong,
-          foregroundColor: AkatorColors.textInverted,
-        ),
-        onPressed: onPressed,
-        icon: const Icon(Icons.add_rounded, size: 32),
+      style: FilledButton.styleFrom(
+        backgroundColor: AkatorColors.primarySoft,
+        foregroundColor: AkatorColors.primaryStrong,
+        side: const BorderSide(color: AkatorColors.primaryBorder),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+        minimumSize: const Size(0, 38),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: onPressed,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Add card',
+            style: WalletStyles.body2Medium(color: AkatorColors.primaryStrong),
+          ),
+          const SizedBox(width: 8),
+          const Icon(Icons.add_rounded, size: 20),
+        ],
       ),
     );
   }

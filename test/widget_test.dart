@@ -58,9 +58,11 @@ void main() {
     expect(find.byKey(const ValueKey('overview-card-scroll')), findsOneWidget);
     expect(find.byKey(const ValueKey('overview-add-card')), findsOneWidget);
     expect(
-      tester.getCenter(find.byKey(const ValueKey('overview-add-card'))).dx,
+      tester.getTopLeft(find.byKey(const ValueKey('overview-add-card'))).dy,
       greaterThan(
-        tester.getCenter(find.byKey(const ValueKey('overview-card-scroll'))).dx,
+        tester
+            .getTopLeft(find.byKey(const ValueKey('overview-card-scroll')))
+            .dy,
       ),
     );
     expect(
