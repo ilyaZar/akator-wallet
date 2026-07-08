@@ -1,6 +1,11 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image_cropper/image_cropper.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'wallet_card_store.dart';
 
@@ -8,8 +13,53 @@ void main() {
   runApp(const AkatorWalletApp());
 }
 
+typedef PickCardImage = Future<String?> Function();
+
+Future<String?> pickCardImageFromCamera() async {
+  final image = await ImagePicker().pickImage(
+    source: ImageSource.camera,
+    imageQuality: 92,
+    maxWidth: 2400,
+  );
+
+  if (image == null) {
+    return null;
+  }
+
+  final croppedImage = await ImageCropper().cropImage(
+    sourcePath: image.path,
+    maxWidth: 2400,
+    maxHeight: 1519,
+    aspectRatio: const CropAspectRatio(ratioX: 158, ratioY: 100),
+    uiSettings: [
+      AndroidUiSettings(
+        toolbarTitle: 'Crop card image',
+        toolbarColor: AkatorColors.primaryStrong,
+        toolbarWidgetColor: AkatorColors.textInverted,
+        activeControlsWidgetColor: AkatorColors.primaryStrong,
+        cropFrameColor: AkatorColors.primaryStrong,
+        cropGridColor: AkatorColors.primaryBorder,
+        backgroundColor: AkatorColors.backgroundNorm,
+        lockAspectRatio: true,
+      ),
+    ],
+  );
+
+  return croppedImage?.path ?? image.path;
+}
+
+Image walletImage(String path, {Key? key, BoxFit fit = BoxFit.cover}) {
+  if (path.startsWith('assets/')) {
+    return Image.asset(path, key: key, fit: fit);
+  }
+
+  return Image.file(File(path), key: key, fit: fit);
+}
+
 class AkatorWalletApp extends StatelessWidget {
-  const AkatorWalletApp({super.key});
+  const AkatorWalletApp({this.pickCardImage, super.key});
+
+  final PickCardImage? pickCardImage;
 
   @override
   Widget build(BuildContext context) {
@@ -28,13 +78,15 @@ class AkatorWalletApp extends StatelessWidget {
           displayColor: AkatorColors.textNorm,
         ),
       ),
-      home: const WalletHomeScreen(),
+      home: WalletHomeScreen(pickCardImage: pickCardImage),
     );
   }
 }
 
 class WalletHomeScreen extends StatefulWidget {
-  const WalletHomeScreen({super.key});
+  const WalletHomeScreen({this.pickCardImage, super.key});
+
+  final PickCardImage? pickCardImage;
 
   @override
   State<WalletHomeScreen> createState() => _WalletHomeScreenState();
@@ -59,6 +111,7 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
         onClose: () => Navigator.of(context).pop(),
       ),
       body: WalletDashboard(
+        pickCardImage: widget.pickCardImage ?? pickCardImageFromCamera,
         section1Open: _section1Open,
         section2Open: _section2Open,
         section3Open: _section3Open,
@@ -140,6 +193,7 @@ class WalletTopBar extends StatelessWidget implements PreferredSizeWidget {
 
 class WalletDashboard extends StatefulWidget {
   const WalletDashboard({
+    required this.pickCardImage,
     required this.section1Open,
     required this.section2Open,
     required this.section3Open,
@@ -149,6 +203,7 @@ class WalletDashboard extends StatefulWidget {
     super.key,
   });
 
+  final PickCardImage pickCardImage;
   final bool section1Open;
   final bool section2Open;
   final bool section3Open;
@@ -198,6 +253,43 @@ class _WalletDashboardState extends State<WalletDashboard> {
             },
           ),
     );
+  }
+
+  Future<void> _addCard() async {
+    final bundle = _cardBundle;
+    if (bundle == null) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AkatorColors.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder:
+          (context) => AddCardSheet(
+            bundle: bundle,
+            pickCardImage: widget.pickCardImage,
+            onSave: _insertCard,
+          ),
+    );
+  }
+
+  void _insertCard(WalletCard card) {
+    final bundle = _cardBundle;
+    if (bundle == null) {
+      return;
+    }
+
+    setState(() {
+      _cardBundle = WalletCardBundle(
+        templates: bundle.templates,
+        cards: [...bundle.cards, card],
+      );
+    });
   }
 
   void _saveCardFields(WalletCard card, Map<String, String> fields) {
@@ -306,6 +398,7 @@ class _WalletDashboardState extends State<WalletDashboard> {
                     bundle: _cardBundle,
                     onToggle: widget.onSection2Toggle,
                     onView: _viewCard,
+                    onAdd: _addCard,
                   ),
                   const SizedBox(height: 16),
                   ExploreSection(
@@ -539,7 +632,7 @@ class FavoriteCardFace extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.asset(card.primaryImage, fit: BoxFit.cover),
+                    walletImage(card.primaryImage, fit: BoxFit.cover),
                     DecoratedBox(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -715,7 +808,7 @@ class _CardDetailSheetState extends State<CardDetailSheet> {
                               borderRadius: BorderRadius.circular(16),
                               child: AspectRatio(
                                 aspectRatio: 1.58,
-                                child: Image.asset(
+                                child: walletImage(
                                   _card.primaryImage,
                                   fit: BoxFit.cover,
                                 ),
@@ -846,7 +939,7 @@ class CardImageThumbnail extends StatelessWidget {
               padding: const EdgeInsets.all(2),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(6),
-                child: Image.asset(image, fit: BoxFit.cover),
+                child: walletImage(image, fit: BoxFit.cover),
               ),
             ),
           ),
@@ -960,7 +1053,7 @@ class _CardImagePreviewSheetState extends State<CardImagePreviewSheet> {
                   child: Center(
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(16),
-                      child: Image.asset(widget.image, fit: BoxFit.contain),
+                      child: walletImage(widget.image, fit: BoxFit.contain),
                     ),
                   ),
                 ),
@@ -1035,9 +1128,9 @@ class CardImageZoomView extends StatelessWidget {
                     width: constraints.maxWidth,
                     height: constraints.maxHeight,
                     child: Center(
-                      child: Image.asset(
-                        key: ValueKey('zoom-image-$image'),
+                      child: walletImage(
                         image,
+                        key: ValueKey('zoom-image-$image'),
                         fit: BoxFit.contain,
                       ),
                     ),
@@ -1244,11 +1337,15 @@ class SensitiveFieldText extends StatefulWidget {
   const SensitiveFieldText({
     required this.field,
     required this.controller,
+    this.errorText,
+    this.warningText,
     super.key,
   });
 
   final CardFieldTemplate field;
   final TextEditingController controller;
+  final String? errorText;
+  final String? warningText;
 
   @override
   State<SensitiveFieldText> createState() => _SensitiveFieldTextState();
@@ -1260,14 +1357,26 @@ class _SensitiveFieldTextState extends State<SensitiveFieldText> {
   @override
   Widget build(BuildContext context) {
     final sensitive = isSensitiveField(widget.field);
+    final warningText = widget.errorText == null ? widget.warningText : null;
 
     return TextField(
       controller: widget.controller,
       keyboardType: keyboardForField(widget.field),
+      inputFormatters: inputFormattersForField(widget.field),
       obscureText: sensitive && !_visible,
       decoration: InputDecoration(
         labelText: widget.field.label,
+        hintText: hintForField(widget.field),
+        errorText: widget.errorText,
+        helperText: warningText,
+        helperStyle: WalletStyles.captionRegular(color: AkatorColors.warning),
         border: const OutlineInputBorder(),
+        focusedBorder: const OutlineInputBorder(
+          borderSide: BorderSide(
+            color: AkatorColors.fieldValidBorder,
+            width: 2,
+          ),
+        ),
         suffixIcon:
             sensitive
                 ? HoldToRevealButton(
@@ -1275,10 +1384,61 @@ class _SensitiveFieldTextState extends State<SensitiveFieldText> {
                   label: widget.field.label,
                   onChanged: (visible) => setState(() => _visible = visible),
                 )
+                : warningText != null
+                ? IconButton(
+                  key: ValueKey('field-warning-${widget.field.key}'),
+                  tooltip: warningText,
+                  onPressed: () => showLuhnWarningDialog(context),
+                  icon: const Icon(
+                    Icons.info_outline_rounded,
+                    color: AkatorColors.warning,
+                  ),
+                )
                 : null,
       ),
     );
   }
+}
+
+Future<void> showLuhnWarningDialog(BuildContext context) {
+  const infoUri = 'https://en.wikipedia.org/wiki/Luhn_algorithm';
+
+  return showDialog<void>(
+    context: context,
+    builder:
+        (context) => AlertDialog(
+          title: const Text('Luhn check warning'),
+          content: const Text(
+            'This checksum is useful for catching typing mistakes, but the '
+            'wallet does not enforce it. You can still save this card number.\n\n'
+            'More information: $infoUri',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final navigator = Navigator.of(context);
+                final messenger = ScaffoldMessenger.maybeOf(context);
+
+                navigator.pop();
+                final opened = await launchUrl(
+                  Uri.parse(infoUri),
+                  mode: LaunchMode.externalApplication,
+                );
+                if (!opened) {
+                  messenger?.showSnackBar(
+                    const SnackBar(content: Text('Could not open article')),
+                  );
+                }
+              },
+              child: const Text('Open article'),
+            ),
+          ],
+        ),
+  );
 }
 
 class HoldToRevealButton extends StatelessWidget {
@@ -1406,20 +1566,31 @@ class _EditCardSheetState extends State<EditCardSheet> {
     };
   }
 
-  void _markDirty() {
-    if (!_saved || mapsEqual(_currentFields(), _savedFields)) {
-      return;
-    }
+  Map<String, String> _validationErrors() {
+    return validationErrorsForTemplate(widget.template, _currentFields());
+  }
 
+  Map<String, String> _validationWarnings() {
+    return validationWarningsForTemplate(widget.template, _currentFields());
+  }
+
+  void _markDirty() {
+    final fields = _currentFields();
     setState(() {
-      _saved = false;
-      _showAlreadySavedMessage = false;
-      _saveMessageVersion++;
+      if (_saved && !mapsEqual(fields, _savedFields)) {
+        _saved = false;
+        _showAlreadySavedMessage = false;
+        _saveMessageVersion++;
+      }
     });
   }
 
   void _handleSave() {
     final fields = _currentFields();
+    if (_validationErrors().isNotEmpty) {
+      return;
+    }
+
     if (_saved && mapsEqual(fields, _savedFields)) {
       _showAlreadySavedNotice();
       return;
@@ -1478,6 +1649,9 @@ class _EditCardSheetState extends State<EditCardSheet> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final validationErrors = _validationErrors();
+    final validationWarnings = _validationWarnings();
+    final canSave = validationErrors.isEmpty;
 
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 18, 20, 20 + bottomInset),
@@ -1522,6 +1696,8 @@ class _EditCardSheetState extends State<EditCardSheet> {
               SensitiveFieldText(
                 field: field,
                 controller: _controllers[field.key]!,
+                errorText: validationErrors[field.key],
+                warningText: validationWarnings[field.key],
               ),
               const SizedBox(height: 12),
             ],
@@ -1549,7 +1725,10 @@ class _EditCardSheetState extends State<EditCardSheet> {
             ),
             SizedBox(
               width: double.infinity,
-              child: SaveChangesButton(saved: _saved, onPressed: _handleSave),
+              child: SaveChangesButton(
+                saved: _saved,
+                onPressed: canSave ? _handleSave : null,
+              ),
             ),
             const SizedBox(height: 10),
             SizedBox(
@@ -1582,7 +1761,7 @@ class SaveChangesButton extends StatelessWidget {
   });
 
   final bool saved;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -1598,6 +1777,896 @@ class SaveChangesButton extends StatelessWidget {
       child: const Text('Save changes'),
     );
   }
+}
+
+enum AddCardSource { image, syncthing, protonDrive }
+
+String addCardSourceLabel(AddCardSource source) {
+  return switch (source) {
+    AddCardSource.image => 'Make an image',
+    AddCardSource.syncthing => 'Syncthing',
+    AddCardSource.protonDrive => 'Proton Drive',
+  };
+}
+
+class AddCardSheet extends StatefulWidget {
+  const AddCardSheet({
+    required this.bundle,
+    required this.pickCardImage,
+    required this.onSave,
+    super.key,
+  });
+
+  final WalletCardBundle bundle;
+  final PickCardImage pickCardImage;
+  final ValueChanged<WalletCard> onSave;
+
+  @override
+  State<AddCardSheet> createState() => _AddCardSheetState();
+}
+
+class _AddCardSheetState extends State<AddCardSheet> {
+  AddCardSource? _source;
+  late CardTemplate _template;
+  late Map<String, TextEditingController> _controllers;
+  final List<String> _images = [];
+  String? _selectedImage;
+  String? _mainImage;
+  bool _pickingImage = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _template = widget.bundle.templates.first;
+    _controllers = controllersForTemplate(
+      _template,
+      onChanged: _handleFieldChanged,
+    );
+  }
+
+  @override
+  void dispose() {
+    disposeControllers(_controllers, onChanged: _handleFieldChanged);
+    super.dispose();
+  }
+
+  void _handleFieldChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+  }
+
+  void _chooseSource(AddCardSource source) {
+    setState(() => _source = source);
+  }
+
+  void _changeTemplate(WalletCardType? type) {
+    if (type == null || type == _template.type) {
+      return;
+    }
+
+    final nextTemplate = widget.bundle.templateFor(type);
+    disposeControllers(_controllers, onChanged: _handleFieldChanged);
+    setState(() {
+      _template = nextTemplate;
+      _controllers = controllersForTemplate(
+        nextTemplate,
+        onChanged: _handleFieldChanged,
+      );
+    });
+  }
+
+  Future<void> _addImage() async {
+    if (_images.length >= 4 || _pickingImage) {
+      return;
+    }
+
+    setState(() => _pickingImage = true);
+    final image = await widget.pickCardImage();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _pickingImage = false;
+      if (image == null || _images.length >= 4) {
+        return;
+      }
+      _images.add(image);
+      _selectedImage ??= image;
+      _mainImage ??= image;
+    });
+  }
+
+  void _selectImage(String image) {
+    setState(() => _selectedImage = image);
+  }
+
+  void _setSelectedAsMainImage() {
+    final image = _selectedImage;
+    if (image == null) {
+      return;
+    }
+
+    setState(() => _mainImage = image);
+  }
+
+  void _deleteImage(String image) {
+    setState(() {
+      _images.remove(image);
+      if (_mainImage == image) {
+        _mainImage = _images.isEmpty ? null : _images.first;
+      }
+      if (_selectedImage == image) {
+        _selectedImage = _mainImage ?? (_images.isEmpty ? null : _images.first);
+      }
+    });
+  }
+
+  void _saveCard() {
+    final source = _source;
+    if (source == null || !canSave) {
+      return;
+    }
+
+    final fields = currentFields(_controllers);
+    final image =
+        _mainImage ??
+        _selectedImage ??
+        fallbackImageForType(widget.bundle, _template.type);
+    final images =
+        [
+          image,
+          for (final item in _images)
+            if (item != image) item,
+        ].take(4).toList();
+
+    widget.onSave(
+      WalletCard(
+        id: 'draft-${DateTime.now().microsecondsSinceEpoch}',
+        type: _template.type,
+        title: titleForDraftCard(_template, fields),
+        subtitle: _template.label,
+        image: image,
+        images: images,
+        accent: '#3370E4',
+        fields: fields,
+        assetSource: {
+          'title': addCardSourceLabel(source),
+          'url': '',
+          'credit': 'in-memory draft',
+        },
+      ),
+    );
+    Navigator.of(context).pop();
+  }
+
+  bool get canSave {
+    final source = _source;
+    if (source == null) {
+      return false;
+    }
+    if (source == AddCardSource.image && _images.isEmpty) {
+      return false;
+    }
+
+    return validationErrorsForTemplate(
+      _template,
+      currentFields(_controllers),
+    ).isEmpty;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final source = _source;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.86,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 18, 20, 20 + bottomInset),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Add card',
+                    style: WalletStyles.subheadline(
+                      color: AkatorColors.textNorm,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close add card',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Expanded(
+              child:
+                  source == null
+                      ? AddCardSourcePicker(onSelected: _chooseSource)
+                      : SingleChildScrollView(
+                        child: AddCardDraftForm(
+                          source: source,
+                          templates: widget.bundle.templates,
+                          template: _template,
+                          controllers: _controllers,
+                          fieldErrors: validationErrorsForTemplate(
+                            _template,
+                            currentFields(_controllers),
+                          ),
+                          fieldWarnings: validationWarningsForTemplate(
+                            _template,
+                            currentFields(_controllers),
+                          ),
+                          images: _images,
+                          selectedImage: _selectedImage,
+                          mainImage: _mainImage,
+                          pickingImage: _pickingImage,
+                          onSourceBack: () => setState(() => _source = null),
+                          onTypeChanged: _changeTemplate,
+                          onAddImage: _addImage,
+                          onSelectImage: _selectImage,
+                          onSetMainImage: _setSelectedAsMainImage,
+                          onDeleteImage: _deleteImage,
+                        ),
+                      ),
+            ),
+            const SizedBox(height: 12),
+            if (source != null)
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  key: const ValueKey('save-new-card'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AkatorColors.primaryStrong,
+                    foregroundColor: AkatorColors.textInverted,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  onPressed: canSave ? _saveCard : null,
+                  child: const Text('Save card'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class AddCardSourcePicker extends StatelessWidget {
+  const AddCardSourcePicker({required this.onSelected, super.key});
+
+  final ValueChanged<AddCardSource> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      children: [
+        Text(
+          'Internal storage',
+          style: WalletStyles.body1Medium(color: AkatorColors.textNorm),
+        ),
+        const SizedBox(height: 8),
+        AddCardPathButton(
+          key: const ValueKey('add-card-path-image'),
+          icon: Icons.photo_camera_rounded,
+          title: 'Make an image',
+          detail: 'Take images and fill the card fields yourself',
+          onPressed: () => onSelected(AddCardSource.image),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'External storage',
+          style: WalletStyles.body1Medium(color: AkatorColors.textNorm),
+        ),
+        const SizedBox(height: 8),
+        AddCardPathButton(
+          key: const ValueKey('add-card-path-syncthing'),
+          icon: Icons.sync_rounded,
+          title: 'Syncthing',
+          detail: 'Placeholder connection',
+          onPressed: () => onSelected(AddCardSource.syncthing),
+        ),
+        const SizedBox(height: 8),
+        AddCardPathButton(
+          key: const ValueKey('add-card-path-proton-drive'),
+          icon: Icons.cloud_outlined,
+          title: 'Proton Drive',
+          detail: 'Placeholder connection',
+          onPressed: () => onSelected(AddCardSource.protonDrive),
+        ),
+      ],
+    );
+  }
+}
+
+class AddCardPathButton extends StatelessWidget {
+  const AddCardPathButton({
+    required this.icon,
+    required this.title,
+    required this.detail,
+    required this.onPressed,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String detail;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onPressed,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: AkatorColors.backgroundNorm,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AkatorColors.appBarDividerColor),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                Icon(icon, color: AkatorColors.primaryStrong),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: WalletStyles.body1Medium(
+                          color: AkatorColors.textNorm,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        detail,
+                        style: WalletStyles.captionRegular(
+                          color: AkatorColors.textWeak,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AddCardDraftForm extends StatelessWidget {
+  const AddCardDraftForm({
+    required this.source,
+    required this.templates,
+    required this.template,
+    required this.controllers,
+    required this.fieldErrors,
+    required this.fieldWarnings,
+    required this.images,
+    required this.selectedImage,
+    required this.mainImage,
+    required this.pickingImage,
+    required this.onSourceBack,
+    required this.onTypeChanged,
+    required this.onAddImage,
+    required this.onSelectImage,
+    required this.onSetMainImage,
+    required this.onDeleteImage,
+    super.key,
+  });
+
+  final AddCardSource source;
+  final List<CardTemplate> templates;
+  final CardTemplate template;
+  final Map<String, TextEditingController> controllers;
+  final Map<String, String> fieldErrors;
+  final Map<String, String> fieldWarnings;
+  final List<String> images;
+  final String? selectedImage;
+  final String? mainImage;
+  final bool pickingImage;
+  final VoidCallback onSourceBack;
+  final ValueChanged<WalletCardType?> onTypeChanged;
+  final VoidCallback onAddImage;
+  final ValueChanged<String> onSelectImage;
+  final VoidCallback onSetMainImage;
+  final ValueChanged<String> onDeleteImage;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<WalletCardType>(
+                key: const ValueKey('add-card-type-selector'),
+                value: template.type,
+                decoration: const InputDecoration(
+                  labelText: 'Card type',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  for (final item in templates)
+                    DropdownMenuItem(value: item.type, child: Text(item.label)),
+                ],
+                onChanged: onTypeChanged,
+              ),
+            ),
+            const SizedBox(width: 10),
+            IconButton.filledTonal(
+              tooltip: 'Choose source',
+              onPressed: onSourceBack,
+              icon: const Icon(Icons.swap_horiz_rounded),
+            ),
+          ],
+        ),
+        if (source == AddCardSource.image) ...[
+          const SizedBox(height: 12),
+          DraftImageActionRow(
+            images: images,
+            pickingImage: pickingImage,
+            onAddImage: onAddImage,
+          ),
+        ],
+        const SizedBox(height: 14),
+        if (source == AddCardSource.image)
+          DraftImageEditor(
+            images: images,
+            selectedImage: selectedImage,
+            mainImage: mainImage,
+            onSelectImage: onSelectImage,
+            onSetMainImage: onSetMainImage,
+            onDeleteImage: onDeleteImage,
+          )
+        else
+          ExternalStoragePlaceholder(source: source),
+        const SizedBox(height: 16),
+        for (final field in template.fields) ...[
+          SensitiveFieldText(
+            field: field,
+            controller: controllers[field.key]!,
+            errorText: fieldErrors[field.key],
+            warningText: fieldWarnings[field.key],
+          ),
+          const SizedBox(height: 12),
+        ],
+      ],
+    );
+  }
+}
+
+class DraftImageActionRow extends StatelessWidget {
+  const DraftImageActionRow({
+    required this.images,
+    required this.pickingImage,
+    required this.onAddImage,
+    super.key,
+  });
+
+  final List<String> images;
+  final bool pickingImage;
+  final VoidCallback onAddImage;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        FilledButton.tonalIcon(
+          key: const ValueKey('add-draft-image'),
+          style: FilledButton.styleFrom(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          onPressed: images.length < 4 && !pickingImage ? onAddImage : null,
+          icon: const Icon(Icons.photo_camera_rounded),
+          label: Text(pickingImage ? 'Opening camera' : 'Add image'),
+        ),
+        const Spacer(),
+        ImageCountBadge(count: images.length),
+      ],
+    );
+  }
+}
+
+class ImageCountBadge extends StatelessWidget {
+  const ImageCountBadge({required this.count, super.key});
+
+  final int count;
+
+  Color get color {
+    if (count >= 4) {
+      return AkatorColors.danger;
+    }
+    if (count == 3) {
+      return AkatorColors.warning;
+    }
+    if (count >= 1) {
+      return AkatorColors.success;
+    }
+    return AkatorColors.textHint;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final activeColor = color;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: activeColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: activeColor.withValues(alpha: 0.42)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        child: Text(
+          'Images ($count/4)',
+          style: WalletStyles.body2Medium(color: activeColor),
+        ),
+      ),
+    );
+  }
+}
+
+class DraftImageEditor extends StatefulWidget {
+  const DraftImageEditor({
+    required this.images,
+    required this.selectedImage,
+    required this.mainImage,
+    required this.onSelectImage,
+    required this.onSetMainImage,
+    required this.onDeleteImage,
+    super.key,
+  });
+
+  final List<String> images;
+  final String? selectedImage;
+  final String? mainImage;
+  final ValueChanged<String> onSelectImage;
+  final VoidCallback onSetMainImage;
+  final ValueChanged<String> onDeleteImage;
+
+  @override
+  State<DraftImageEditor> createState() => _DraftImageEditorState();
+}
+
+class _DraftImageEditorState extends State<DraftImageEditor> {
+  bool _showAlreadySetMessage = false;
+  int _messageVersion = 0;
+
+  @override
+  void didUpdateWidget(DraftImageEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedImage != widget.selectedImage ||
+        oldWidget.mainImage != widget.mainImage) {
+      _showAlreadySetMessage = false;
+      _messageVersion++;
+    }
+  }
+
+  void _handleSetMainImage() {
+    final image = widget.selectedImage;
+    if (image == null) {
+      return;
+    }
+
+    if (image == widget.mainImage) {
+      _showAlreadySetNotice();
+      return;
+    }
+
+    widget.onSetMainImage();
+    setState(() {
+      _showAlreadySetMessage = false;
+      _messageVersion++;
+    });
+  }
+
+  void _showAlreadySetNotice() {
+    final version = ++_messageVersion;
+    setState(() => _showAlreadySetMessage = true);
+
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!mounted || version != _messageVersion) {
+        return;
+      }
+      setState(() => _showAlreadySetMessage = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final image = widget.selectedImage;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (image == null)
+          const EmptyDraftImagePanel()
+        else
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: Tooltip(
+                message: 'Zoom draft image',
+                child: GestureDetector(
+                  key: const ValueKey('zoom-draft-main-image'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => showCardImageZoom(context, image),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: AspectRatio(
+                      aspectRatio: 1.58,
+                      child: walletImage(image, fit: BoxFit.cover),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (widget.images.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          DraftImageThumbnailRow(
+            images: widget.images,
+            selectedImage: image,
+            onSelectImage: widget.onSelectImage,
+            onDeleteImage: widget.onDeleteImage,
+          ),
+        ],
+        const SizedBox(height: 12),
+        if (image != null) ...[
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 160),
+            child:
+                _showAlreadySetMessage
+                    ? Padding(
+                      key: const ValueKey('draft-already-set-message'),
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          'already set as main image',
+                          style: WalletStyles.captionRegular(
+                            color: AkatorColors.success,
+                          ),
+                        ),
+                      ),
+                    )
+                    : const SizedBox.shrink(
+                      key: ValueKey('draft-already-set-message-empty'),
+                    ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: MainImageButton(
+              key: const ValueKey('set-draft-main-image'),
+              isMainImage: image == widget.mainImage,
+              onPressed: _handleSetMainImage,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class EmptyDraftImagePanel extends StatelessWidget {
+  const EmptyDraftImagePanel({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AkatorColors.backgroundNorm,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AkatorColors.appBarDividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.photo_camera_rounded,
+              color: AkatorColors.primaryStrong,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Add up to four images',
+                style: WalletStyles.body2Medium(color: AkatorColors.textWeak),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class DraftImageThumbnailRow extends StatelessWidget {
+  const DraftImageThumbnailRow({
+    required this.images,
+    required this.selectedImage,
+    required this.onSelectImage,
+    required this.onDeleteImage,
+    super.key,
+  });
+
+  final List<String> images;
+  final String? selectedImage;
+  final ValueChanged<String> onSelectImage;
+  final ValueChanged<String> onDeleteImage;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 64,
+      child: Row(
+        children: [
+          for (var index = 0; index < images.length; index++) ...[
+            if (index > 0) const SizedBox(width: 8),
+            Expanded(
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned.fill(
+                    child: CardImageThumbnail(
+                      cardId: 'draft',
+                      image: images[index],
+                      index: index,
+                      selected: images[index] == selectedImage,
+                      onTap: () => onSelectImage(images[index]),
+                    ),
+                  ),
+                  Positioned(
+                    right: -6,
+                    top: -8,
+                    child: IconButton.filled(
+                      key: ValueKey('delete-draft-image-$index'),
+                      tooltip: 'Delete image ${index + 1}',
+                      style: IconButton.styleFrom(
+                        fixedSize: const Size(30, 30),
+                        backgroundColor: AkatorColors.danger,
+                        foregroundColor: AkatorColors.textInverted,
+                        padding: EdgeInsets.zero,
+                      ),
+                      onPressed: () => onDeleteImage(images[index]),
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class ExternalStoragePlaceholder extends StatelessWidget {
+  const ExternalStoragePlaceholder({required this.source, super.key});
+
+  final AddCardSource source;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AkatorColors.backgroundNorm,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AkatorColors.appBarDividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Icon(
+              source == AddCardSource.syncthing
+                  ? Icons.sync_rounded
+                  : Icons.cloud_outlined,
+              color: AkatorColors.primaryStrong,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '${addCardSourceLabel(source)} connection placeholder',
+                style: WalletStyles.body2Medium(color: AkatorColors.textWeak),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Map<String, TextEditingController> controllersForTemplate(
+  CardTemplate template, {
+  VoidCallback? onChanged,
+}) {
+  final controllers = <String, TextEditingController>{};
+
+  for (final field in template.fields) {
+    final controller = TextEditingController();
+    if (onChanged != null) {
+      controller.addListener(onChanged);
+    }
+    controllers[field.key] = controller;
+  }
+
+  return controllers;
+}
+
+void disposeControllers(
+  Map<String, TextEditingController> controllers, {
+  VoidCallback? onChanged,
+}) {
+  for (final controller in controllers.values) {
+    if (onChanged != null) {
+      controller.removeListener(onChanged);
+    }
+    controller.dispose();
+  }
+}
+
+Map<String, String> currentFields(
+  Map<String, TextEditingController> controllers,
+) {
+  return {for (final entry in controllers.entries) entry.key: entry.value.text};
+}
+
+String titleForDraftCard(CardTemplate template, Map<String, String> fields) {
+  const preferredKeys = [
+    'name',
+    'full_name',
+    'program',
+    'provider',
+    'license_number',
+    'document_number',
+    'student_number',
+    'member_number',
+  ];
+
+  for (final key in preferredKeys) {
+    final value = fields[key]?.trim();
+    if (value != null && value.isNotEmpty) {
+      return value;
+    }
+  }
+
+  return 'New ${template.label}';
+}
+
+String fallbackImageForType(WalletCardBundle bundle, WalletCardType type) {
+  for (final card in bundle.cards) {
+    if (card.type == type) {
+      return card.primaryImage;
+    }
+  }
+
+  return bundle.cards.first.primaryImage;
 }
 
 class FavoriteCarouselSkeleton extends StatelessWidget {
@@ -1650,6 +2719,295 @@ TextInputType keyboardForField(CardFieldTemplate field) {
     'number' => TextInputType.number,
     _ => TextInputType.text,
   };
+}
+
+List<TextInputFormatter> inputFormattersForField(CardFieldTemplate field) {
+  return switch (field.key) {
+    'card_number' => [const GroupedDigitsInputFormatter(maxDigits: 19)],
+    'expiration_date' => [const ExpirationDateInputFormatter()],
+    'cvc' => [
+      FilteringTextInputFormatter.digitsOnly,
+      LengthLimitingTextInputFormatter(4),
+    ],
+    _ => const [],
+  };
+}
+
+String? hintForField(CardFieldTemplate field) {
+  return switch (field.key) {
+    'card_number' => '1234 1234 1234 1234',
+    'expiration_date' => 'MM/YY',
+    'cvc' => '123',
+    _ => null,
+  };
+}
+
+Map<String, String> validationErrorsForTemplate(
+  CardTemplate template,
+  Map<String, String> fields,
+) {
+  if (template.type != WalletCardType.creditCard) {
+    return const {};
+  }
+
+  final errors = <String, String>{};
+
+  void addError(String key, String? error) {
+    if (template.fieldByKey(key) != null && error != null) {
+      errors[key] = error;
+    }
+  }
+
+  addError('expiration_date', expirationDateError(fields['expiration_date']));
+  addError('card_number', cardNumberError(fields['card_number']));
+  addError('cvc', cvcError(fields['cvc'], fields['card_number']));
+
+  return errors;
+}
+
+String? expirationDateError(String? value) {
+  final digits = paymentCardDigits(value ?? '');
+  if (digits.isEmpty) {
+    return 'Expiration date is required';
+  }
+  if (digits.length != 4) {
+    return 'Use MM/YY';
+  }
+
+  final month = int.tryParse(digits.substring(0, 2));
+  if (month == null || month < 1 || month > 12) {
+    return 'Month must be 01-12';
+  }
+
+  return null;
+}
+
+String? cardNumberError(String? value) {
+  final digits = paymentCardDigits(value ?? '');
+  if (digits.isEmpty) {
+    return 'Card number is required';
+  }
+
+  final issuer = paymentCardIssuerFor(digits);
+  final lengths = allowedCardNumberLengths(issuer);
+  final minLength = lengths.reduce(math.min);
+  final maxLength = lengths.reduce(math.max);
+
+  if (digits.length < minLength || digits.length > maxLength) {
+    return issuer == PaymentCardIssuer.unknown
+        ? 'Use 13-19 digits'
+        : 'Use ${formatAllowedLengths(lengths)} digits for ${issuer.label}';
+  }
+  if (!lengths.contains(digits.length)) {
+    return 'Use ${formatAllowedLengths(lengths)} digits for ${issuer.label}';
+  }
+
+  return null;
+}
+
+Map<String, String> validationWarningsForTemplate(
+  CardTemplate template,
+  Map<String, String> fields,
+) {
+  if (template.type != WalletCardType.creditCard) {
+    return const {};
+  }
+
+  final warnings = <String, String>{};
+  final cardNumberWarning = luhnWarning(fields['card_number']);
+  if (template.fieldByKey('card_number') != null && cardNumberWarning != null) {
+    warnings['card_number'] = cardNumberWarning;
+  }
+
+  return warnings;
+}
+
+String? luhnWarning(String? value) {
+  if (cardNumberError(value) != null) {
+    return null;
+  }
+
+  final digits = paymentCardDigits(value ?? '');
+  if (!passesLuhnCheck(digits)) {
+    return 'Luhn check not passed';
+  }
+
+  return null;
+}
+
+String? cvcError(String? value, String? cardNumber) {
+  final digits = paymentCardDigits(value ?? '');
+  if (digits.isEmpty) {
+    return 'CVC code is required';
+  }
+
+  final cardDigits = paymentCardDigits(cardNumber ?? '');
+  final issuer = paymentCardIssuerFor(cardDigits);
+  final expectedLength = issuer == PaymentCardIssuer.amex ? 4 : 3;
+  if (digits.length != expectedLength) {
+    return 'Use $expectedLength digits';
+  }
+
+  return null;
+}
+
+String paymentCardDigits(String value) {
+  return value.replaceAll(RegExp(r'\D'), '');
+}
+
+String formatPaymentCardNumber(String value) {
+  final digits = paymentCardDigits(value);
+  final trimmed = digits.substring(0, math.min(digits.length, 19));
+  final groups = <String>[];
+
+  for (var index = 0; index < trimmed.length; index += 4) {
+    groups.add(trimmed.substring(index, math.min(index + 4, trimmed.length)));
+  }
+
+  return groups.join(' ');
+}
+
+String formatExpirationDate(String value) {
+  final digits = paymentCardDigits(value);
+  final trimmed = digits.substring(0, math.min(digits.length, 4));
+  if (trimmed.length <= 2) {
+    return trimmed;
+  }
+
+  return '${trimmed.substring(0, 2)}/${trimmed.substring(2)}';
+}
+
+bool passesLuhnCheck(String digits) {
+  var sum = 0;
+  var doubleDigit = false;
+
+  for (var index = digits.length - 1; index >= 0; index--) {
+    var value = int.parse(digits[index]);
+    if (doubleDigit) {
+      value *= 2;
+      if (value > 9) {
+        value -= 9;
+      }
+    }
+    sum += value;
+    doubleDigit = !doubleDigit;
+  }
+
+  return sum % 10 == 0;
+}
+
+enum PaymentCardIssuer {
+  amex('American Express'),
+  discover('Discover'),
+  mastercard('Mastercard'),
+  visa('Visa'),
+  unknown('card');
+
+  const PaymentCardIssuer(this.label);
+
+  final String label;
+}
+
+PaymentCardIssuer paymentCardIssuerFor(String digits) {
+  if (digits.startsWith('34') || digits.startsWith('37')) {
+    return PaymentCardIssuer.amex;
+  }
+  if (digits.startsWith('4')) {
+    return PaymentCardIssuer.visa;
+  }
+  if (digits.startsWith('6011') || digits.startsWith('65')) {
+    return PaymentCardIssuer.discover;
+  }
+
+  final firstThree =
+      digits.length >= 3 ? int.tryParse(digits.substring(0, 3)) : null;
+  if (firstThree != null && firstThree >= 644 && firstThree <= 649) {
+    return PaymentCardIssuer.discover;
+  }
+
+  final firstTwo =
+      digits.length >= 2 ? int.tryParse(digits.substring(0, 2)) : null;
+  if (firstTwo != null && firstTwo >= 51 && firstTwo <= 55) {
+    return PaymentCardIssuer.mastercard;
+  }
+
+  final firstFour =
+      digits.length >= 4 ? int.tryParse(digits.substring(0, 4)) : null;
+  if (firstFour != null && firstFour >= 2221 && firstFour <= 2720) {
+    return PaymentCardIssuer.mastercard;
+  }
+
+  final firstSix =
+      digits.length >= 6 ? int.tryParse(digits.substring(0, 6)) : null;
+  if (firstSix != null && firstSix >= 622126 && firstSix <= 622925) {
+    return PaymentCardIssuer.discover;
+  }
+
+  return PaymentCardIssuer.unknown;
+}
+
+Set<int> allowedCardNumberLengths(PaymentCardIssuer issuer) {
+  return switch (issuer) {
+    PaymentCardIssuer.amex => const {15},
+    PaymentCardIssuer.discover => const {16, 17, 18, 19},
+    PaymentCardIssuer.mastercard => const {16},
+    PaymentCardIssuer.visa => const {13, 16, 19},
+    PaymentCardIssuer.unknown => const {13, 14, 15, 16, 17, 18, 19},
+  };
+}
+
+String formatAllowedLengths(Set<int> lengths) {
+  final sorted = lengths.toList()..sort();
+  if (sorted.length == 1) {
+    return sorted.single.toString();
+  }
+
+  final isContinuous =
+      sorted.last - sorted.first + 1 == sorted.length &&
+      sorted.toSet().length == sorted.length;
+  if (isContinuous) {
+    return '${sorted.first}-${sorted.last}';
+  }
+
+  return sorted.join(', ');
+}
+
+class GroupedDigitsInputFormatter extends TextInputFormatter {
+  const GroupedDigitsInputFormatter({required this.maxDigits});
+
+  final int maxDigits;
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digits = paymentCardDigits(newValue.text);
+    final trimmed = digits.substring(0, math.min(digits.length, maxDigits));
+    final formatted = formatPaymentCardNumber(trimmed);
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
+}
+
+class ExpirationDateInputFormatter extends TextInputFormatter {
+  const ExpirationDateInputFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final formatted = formatExpirationDate(newValue.text);
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
 }
 
 double currentCarouselPage(PageController controller, int selectedIndex) {
@@ -1736,6 +3094,7 @@ class OverviewSection extends StatefulWidget {
     required this.bundle,
     required this.onToggle,
     required this.onView,
+    required this.onAdd,
     super.key,
   });
 
@@ -1743,6 +3102,7 @@ class OverviewSection extends StatefulWidget {
   final WalletCardBundle? bundle;
   final VoidCallback onToggle;
   final void Function(WalletCard card, CardTemplate template) onView;
+  final VoidCallback onAdd;
 
   @override
   State<OverviewSection> createState() => _OverviewSectionState();
@@ -1825,6 +3185,7 @@ class _OverviewSectionState extends State<OverviewSection> {
               cards: cards,
               bundle: bundle,
               onView: widget.onView,
+              onAdd: widget.onAdd,
             ),
         ],
       ),
@@ -1846,36 +3207,49 @@ class OverviewCardGrid extends StatelessWidget {
     required this.cards,
     required this.bundle,
     required this.onView,
+    required this.onAdd,
     super.key,
   });
 
   final List<WalletCard> cards;
   final WalletCardBundle bundle;
   final void Function(WalletCard card, CardTemplate template) onView;
+  final VoidCallback onAdd;
 
   @override
   Widget build(BuildContext context) {
     if (cards.isEmpty) {
-      return const OverviewEmptyState();
+      return OverviewEmptyState(onAdd: onAdd);
     }
 
-    return GridView.count(
+    return LayoutBuilder(
       key: const ValueKey('overview-card-grid'),
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
-      childAspectRatio: 1.85,
-      children: [
-        for (final card in cards)
-          OverviewCardTile(
-            card: card,
-            template: bundle.templateFor(card.type),
-            onView: () => onView(card, bundle.templateFor(card.type)),
-          ),
-        const AddCardButton(),
-      ],
+      builder: (context, constraints) {
+        final tileWidth = (constraints.maxWidth - 12) / 2;
+        final tileHeight = tileWidth / 1.85;
+
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final card in cards)
+              SizedBox(
+                width: tileWidth,
+                height: tileHeight,
+                child: OverviewCardTile(
+                  card: card,
+                  template: bundle.templateFor(card.type),
+                  onView: () => onView(card, bundle.templateFor(card.type)),
+                ),
+              ),
+            SizedBox(
+              width: tileWidth,
+              height: tileHeight,
+              child: AddCardButton(onPressed: onAdd),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -1917,7 +3291,7 @@ class OverviewCardTile extends StatelessWidget {
                     child: SizedBox(
                       width: 50,
                       height: 32,
-                      child: Image.asset(card.primaryImage, fit: BoxFit.cover),
+                      child: walletImage(card.primaryImage, fit: BoxFit.cover),
                     ),
                   ),
                   const SizedBox(width: 9),
@@ -1957,7 +3331,9 @@ class OverviewCardTile extends StatelessWidget {
 }
 
 class OverviewEmptyState extends StatelessWidget {
-  const OverviewEmptyState({super.key});
+  const OverviewEmptyState({required this.onAdd, super.key});
+
+  final VoidCallback onAdd;
 
   @override
   Widget build(BuildContext context) {
@@ -1980,7 +3356,10 @@ class OverviewEmptyState extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
-        const Align(alignment: Alignment.centerRight, child: AddCardButton()),
+        Align(
+          alignment: Alignment.centerRight,
+          child: AddCardButton(onPressed: onAdd),
+        ),
       ],
     );
   }
@@ -2316,7 +3695,9 @@ class OverviewFilterChip extends StatelessWidget {
 }
 
 class AddCardButton extends StatelessWidget {
-  const AddCardButton({super.key});
+  const AddCardButton({required this.onPressed, super.key});
+
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -2329,7 +3710,7 @@ class AddCardButton extends StatelessWidget {
           backgroundColor: AkatorColors.primaryStrong,
           foregroundColor: AkatorColors.textInverted,
         ),
-        onPressed: () {},
+        onPressed: onPressed,
         icon: const Icon(Icons.add_rounded, size: 32),
       ),
     );
@@ -2560,6 +3941,8 @@ class AkatorColors {
   static const primaryBorder = Color(0xFFBFDBFE);
   static const success = Color(0xFF16A34A);
   static const successBorder = Color(0xFF15803D);
+  static const fieldValidBorder = Color(0xFF15803D);
+  static const warning = Color(0xFFF59E0B);
   static const danger = Color(0xFFDC2626);
   static const loadingShadow = Color(0x223370E4);
   static const drawerBackground = Color(0xFF1E3A8A);
