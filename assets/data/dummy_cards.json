@@ -74,6 +74,81 @@
         "url": "https://commons.wikimedia.org/wiki/File:Identity_card_of_the_State_of_Califorinia,_sample_(2010).jpg",
         "credit": "California DMV, public domain"
       }
+    },
+    {
+      "id": "demo-health-insurance",
+      "type": "health_insurance",
+      "title": "Medicare Sample",
+      "subtitle": "Health insurance",
+      "image": "assets/cards/health_insurance.jpg",
+      "images": [
+        "assets/cards/health_insurance.jpg",
+        "assets/cards/health_insurance_2.jpg",
+        "assets/cards/health_insurance_3.jpg",
+        "assets/cards/health_insurance_4.jpg"
+      ],
+      "accent": "#0F766E",
+      "fields": {
+        "full_name": "John L Smith",
+        "provider": "Medicare",
+        "member_number": "1EG4-TE5-MK72",
+        "valid_until": "2030-03-01"
+      },
+      "asset_source": {
+        "title": "New US Medicare Card Sample 2018.jpg",
+        "url": "https://commons.wikimedia.org/wiki/File:New_US_Medicare_Card_Sample_2018.jpg",
+        "credit": "medicare.gov, public domain"
+      }
+    },
+    {
+      "id": "demo-loyalty-card",
+      "type": "loyalty_card",
+      "title": "Blockbuster Club",
+      "subtitle": "Loyalty card",
+      "image": "assets/cards/loyalty_card.jpg",
+      "images": [
+        "assets/cards/loyalty_card.jpg",
+        "assets/cards/loyalty_card_2.jpg",
+        "assets/cards/loyalty_card_3.jpg",
+        "assets/cards/loyalty_card_4.jpg"
+      ],
+      "accent": "#1D4ED8",
+      "fields": {
+        "name": "Jane Member",
+        "program": "Blockbuster Video",
+        "member_number": "BB-1989-4242",
+        "valid_until": "2029-12-31"
+      },
+      "asset_source": {
+        "title": "Blockbuster membership card.jpg",
+        "url": "https://commons.wikimedia.org/wiki/File:Blockbuster_membership_card.jpg",
+        "credit": "Blockbuster LLC, public domain textlogo"
+      }
+    },
+    {
+      "id": "demo-driving-license",
+      "type": "driving_license",
+      "title": "Massachusetts License",
+      "subtitle": "Driving license",
+      "image": "assets/cards/driving_license.jpg",
+      "images": [
+        "assets/cards/driving_license.jpg",
+        "assets/cards/driving_license_2.jpg",
+        "assets/cards/driving_license_3.jpg",
+        "assets/cards/driving_license_4.jpg"
+      ],
+      "accent": "#7C3AED",
+      "fields": {
+        "full_name": "Connor Sample",
+        "license_number": "S99988801",
+        "class": "D",
+        "expires_on": "2021-01-12"
+      },
+      "asset_source": {
+        "title": "Massachusetts-drivers-license sample, 2016.jpg",
+        "url": "https://commons.wikimedia.org/wiki/File:Massachusetts-drivers-license_sample,_2016.jpg",
+        "credit": "MA DMV, public domain"
+      }
     }
   ]
 }

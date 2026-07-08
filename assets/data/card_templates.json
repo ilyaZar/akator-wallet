@@ -25,6 +25,26 @@
       ]
     },
     {
+      "type": "health_insurance",
+      "label": "Health insurance",
+      "fields": [
+        { "key": "full_name", "label": "Full name", "input": "text" },
+        { "key": "provider", "label": "Provider", "input": "text" },
+        { "key": "member_number", "label": "Member number", "input": "text" },
+        { "key": "valid_until", "label": "Valid until", "input": "date" }
+      ]
+    },
+    {
+      "type": "loyalty_card",
+      "label": "Loyalty card",
+      "fields": [
+        { "key": "name", "label": "Name", "input": "text" },
+        { "key": "program", "label": "Program", "input": "text" },
+        { "key": "member_number", "label": "Member number", "input": "text" },
+        { "key": "valid_until", "label": "Valid until", "input": "date" }
+      ]
+    },
+    {
       "type": "driving_license",
       "label": "Driving license",
       "fields": [

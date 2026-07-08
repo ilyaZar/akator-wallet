@@ -26,4 +26,7 @@ wallet UI:
 - credit card mockup: `CC 2.png` by Jed1571, CC BY 3.0
 - student ID sample: 1958 Allentown High School ID, public domain
 - personal ID sample: California DMV sample ID, public domain
+- health insurance sample: Medicare sample card, U.S. government public domain
+- loyalty card sample: Blockbuster membership card, public domain text logo
+- driving license sample: Massachusetts sample driver license, public domain
 - numbered variants are local demo copies generated from the same source images
