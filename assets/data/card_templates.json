@@ -1,0 +1,48 @@
+{
+  "templates": [
+    {
+      "type": "credit_card",
+      "label": "Credit card",
+      "fields": [
+        { "key": "name", "label": "Name", "input": "text" },
+        {
+          "key": "expiration_date",
+          "label": "Expiration date",
+          "input": "month"
+        },
+        { "key": "card_number", "label": "Card number", "input": "number" },
+        { "key": "cvc", "label": "CVC code", "input": "number" }
+      ]
+    },
+    {
+      "type": "personal_id",
+      "label": "Personal ID",
+      "fields": [
+        { "key": "full_name", "label": "Full name", "input": "text" },
+        { "key": "document_number", "label": "Document number", "input": "text" },
+        { "key": "date_of_birth", "label": "Date of birth", "input": "date" },
+        { "key": "expires_on", "label": "Expires on", "input": "date" }
+      ]
+    },
+    {
+      "type": "driving_license",
+      "label": "Driving license",
+      "fields": [
+        { "key": "full_name", "label": "Full name", "input": "text" },
+        { "key": "license_number", "label": "License number", "input": "text" },
+        { "key": "class", "label": "Class", "input": "text" },
+        { "key": "expires_on", "label": "Expires on", "input": "date" }
+      ]
+    },
+    {
+      "type": "student_id",
+      "label": "Student ID",
+      "fields": [
+        { "key": "full_name", "label": "Full name", "input": "text" },
+        { "key": "school", "label": "School", "input": "text" },
+        { "key": "student_number", "label": "Student number", "input": "text" },
+        { "key": "valid_until", "label": "Valid until", "input": "date" }
+      ]
+    }
+  ]
+}
