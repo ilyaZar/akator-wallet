@@ -138,7 +138,7 @@ class WalletTopBar extends StatelessWidget implements PreferredSizeWidget {
   }
 }
 
-class WalletDashboard extends StatelessWidget {
+class WalletDashboard extends StatefulWidget {
   const WalletDashboard({
     required this.section1Open,
     required this.section2Open,
@@ -157,72 +157,16 @@ class WalletDashboard extends StatelessWidget {
   final VoidCallback onSection3Toggle;
 
   @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
-        children: [
-          Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  FavoritesSection(
-                    expanded: section1Open,
-                    onToggle: onSection1Toggle,
-                  ),
-                  const SizedBox(height: 16),
-                  OverviewSection(
-                    expanded: section2Open,
-                    onToggle: onSection2Toggle,
-                  ),
-                  const SizedBox(height: 16),
-                  ExploreSection(
-                    expanded: section3Open,
-                    onToggle: onSection3Toggle,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  State<WalletDashboard> createState() => _WalletDashboardState();
 }
 
-class FavoritesSection extends StatefulWidget {
-  const FavoritesSection({
-    required this.expanded,
-    required this.onToggle,
-    super.key,
-  });
-
-  final bool expanded;
-  final VoidCallback onToggle;
-
-  @override
-  State<FavoritesSection> createState() => _FavoritesSectionState();
-}
-
-class _FavoritesSectionState extends State<FavoritesSection> {
-  late final PageController _pageController;
+class _WalletDashboardState extends State<WalletDashboard> {
   WalletCardBundle? _cardBundle;
-  int _selectedIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(viewportFraction: 0.78);
     _loadCards();
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
   }
 
   Future<void> _loadCards() async {
@@ -235,7 +179,7 @@ class _FavoritesSectionState extends State<FavoritesSection> {
   }
 
   Future<void> _editCard(WalletCard card, CardTemplate template) async {
-    final updatedFields = await showModalBottomSheet<Map<String, String>>(
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -243,24 +187,50 @@ class _FavoritesSectionState extends State<FavoritesSection> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
-      builder: (context) => EditCardSheet(card: card, template: template),
+      builder:
+          (context) => EditCardSheet(
+            card: card,
+            template: template,
+            onSave: (fields) => _saveCardFields(card, fields),
+            onDelete: () {
+              _deleteCard(card);
+              Navigator.of(context).pop();
+            },
+          ),
     );
+  }
 
-    if (updatedFields == null || _cardBundle == null) {
+  void _saveCardFields(WalletCard card, Map<String, String> fields) {
+    final bundle = _cardBundle;
+    if (bundle == null) {
       return;
     }
 
-    final cards = [..._cardBundle!.cards];
+    final cards = [...bundle.cards];
     final index = cards.indexWhere((item) => item.id == card.id);
     if (index == -1) {
       return;
     }
 
-    cards[index] = card.copyWith(fields: updatedFields);
+    cards[index] = cards[index].copyWith(fields: fields);
+    setState(() {
+      _cardBundle = WalletCardBundle(templates: bundle.templates, cards: cards);
+    });
+  }
+
+  void _deleteCard(WalletCard card) {
+    final bundle = _cardBundle;
+    if (bundle == null) {
+      return;
+    }
+
     setState(() {
       _cardBundle = WalletCardBundle(
-        templates: _cardBundle!.templates,
-        cards: cards,
+        templates: bundle.templates,
+        cards: [
+          for (final item in bundle.cards)
+            if (item.id != card.id) item,
+        ],
       );
     });
   }
@@ -313,6 +283,81 @@ class _FavoritesSectionState extends State<FavoritesSection> {
 
   @override
   Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+        children: [
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  FavoritesSection(
+                    expanded: widget.section1Open,
+                    bundle: _cardBundle,
+                    onToggle: widget.onSection1Toggle,
+                    onView: _viewCard,
+                  ),
+                  const SizedBox(height: 16),
+                  OverviewSection(
+                    expanded: widget.section2Open,
+                    bundle: _cardBundle,
+                    onToggle: widget.onSection2Toggle,
+                    onView: _viewCard,
+                  ),
+                  const SizedBox(height: 16),
+                  ExploreSection(
+                    expanded: widget.section3Open,
+                    onToggle: widget.onSection3Toggle,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class FavoritesSection extends StatefulWidget {
+  const FavoritesSection({
+    required this.expanded,
+    required this.bundle,
+    required this.onToggle,
+    required this.onView,
+    super.key,
+  });
+
+  final bool expanded;
+  final WalletCardBundle? bundle;
+  final VoidCallback onToggle;
+  final void Function(WalletCard card, CardTemplate template) onView;
+
+  @override
+  State<FavoritesSection> createState() => _FavoritesSectionState();
+}
+
+class _FavoritesSectionState extends State<FavoritesSection> {
+  late final PageController _pageController;
+  int _selectedIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(viewportFraction: 0.78);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return WalletSection(
       sectionLabel: 'Section 1',
       title: 'My favorites',
@@ -323,7 +368,7 @@ class _FavoritesSectionState extends State<FavoritesSection> {
   }
 
   Widget buildCardsContent() {
-    final bundle = _cardBundle;
+    final bundle = widget.bundle;
     if (bundle == null || bundle.cards.isEmpty) {
       return const FavoriteCarouselSkeleton();
     }
@@ -338,7 +383,7 @@ class _FavoritesSectionState extends State<FavoritesSection> {
       onPageChanged: (index) {
         setState(() => _selectedIndex = index);
       },
-      onView: _viewCard,
+      onView: widget.onView,
     );
   }
 }
@@ -370,6 +415,7 @@ class FavoriteCardCarousel extends StatelessWidget {
         SizedBox(
           height: 190,
           child: PageView.builder(
+            key: const ValueKey('favorites-card-carousel'),
             controller: controller,
             itemCount: bundle.cards.length,
             onPageChanged: onPageChanged,
@@ -413,6 +459,7 @@ class FavoriteCardPage extends StatelessWidget {
     required this.selectedIndex,
     required this.controller,
     required this.onView,
+    this.viewKeyPrefix = 'view-card-image',
     super.key,
   });
 
@@ -421,6 +468,7 @@ class FavoriteCardPage extends StatelessWidget {
   final int selectedIndex;
   final PageController controller;
   final VoidCallback onView;
+  final String viewKeyPrefix;
 
   @override
   Widget build(BuildContext context) {
@@ -439,17 +487,27 @@ class FavoriteCardPage extends StatelessWidget {
       },
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        child: FavoriteCardFace(card: card, onView: onView),
+        child: FavoriteCardFace(
+          card: card,
+          onView: onView,
+          viewKeyPrefix: viewKeyPrefix,
+        ),
       ),
     );
   }
 }
 
 class FavoriteCardFace extends StatelessWidget {
-  const FavoriteCardFace({required this.card, required this.onView, super.key});
+  const FavoriteCardFace({
+    required this.card,
+    required this.onView,
+    this.viewKeyPrefix = 'view-card-image',
+    super.key,
+  });
 
   final WalletCard card;
   final VoidCallback onView;
+  final String viewKeyPrefix;
 
   @override
   Widget build(BuildContext context) {
@@ -461,7 +519,7 @@ class FavoriteCardFace extends StatelessWidget {
         label: 'View ${card.title}',
         button: true,
         child: GestureDetector(
-          key: ValueKey('view-card-image-${card.id}'),
+          key: ValueKey('$viewKeyPrefix-${card.id}'),
           onTap: onView,
           child: DecoratedBox(
             decoration: BoxDecoration(
@@ -1207,10 +1265,18 @@ class FavoriteCardDots extends StatelessWidget {
 }
 
 class EditCardSheet extends StatefulWidget {
-  const EditCardSheet({required this.card, required this.template, super.key});
+  const EditCardSheet({
+    required this.card,
+    required this.template,
+    required this.onSave,
+    required this.onDelete,
+    super.key,
+  });
 
   final WalletCard card;
   final CardTemplate template;
+  final ValueChanged<Map<String, String>> onSave;
+  final VoidCallback onDelete;
 
   @override
   State<EditCardSheet> createState() => _EditCardSheetState();
@@ -1218,6 +1284,10 @@ class EditCardSheet extends StatefulWidget {
 
 class _EditCardSheetState extends State<EditCardSheet> {
   late final Map<String, TextEditingController> _controllers;
+  late Map<String, String> _savedFields;
+  bool _saved = false;
+  bool _showAlreadySavedMessage = false;
+  int _saveMessageVersion = 0;
 
   @override
   void initState() {
@@ -1228,14 +1298,94 @@ class _EditCardSheetState extends State<EditCardSheet> {
           text: widget.card.fields[field.key] ?? '',
         ),
     };
+    _savedFields = _currentFields();
+    for (final controller in _controllers.values) {
+      controller.addListener(_markDirty);
+    }
   }
 
   @override
   void dispose() {
     for (final controller in _controllers.values) {
+      controller.removeListener(_markDirty);
       controller.dispose();
     }
     super.dispose();
+  }
+
+  Map<String, String> _currentFields() {
+    return {
+      for (final entry in _controllers.entries) entry.key: entry.value.text,
+    };
+  }
+
+  void _markDirty() {
+    if (!_saved || mapsEqual(_currentFields(), _savedFields)) {
+      return;
+    }
+
+    setState(() {
+      _saved = false;
+      _showAlreadySavedMessage = false;
+      _saveMessageVersion++;
+    });
+  }
+
+  void _handleSave() {
+    final fields = _currentFields();
+    if (_saved && mapsEqual(fields, _savedFields)) {
+      _showAlreadySavedNotice();
+      return;
+    }
+
+    widget.onSave(fields);
+    setState(() {
+      _savedFields = fields;
+      _saved = true;
+      _showAlreadySavedMessage = false;
+      _saveMessageVersion++;
+    });
+  }
+
+  void _showAlreadySavedNotice() {
+    final version = ++_saveMessageVersion;
+    setState(() => _showAlreadySavedMessage = true);
+
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!mounted || version != _saveMessageVersion) {
+        return;
+      }
+      setState(() => _showAlreadySavedMessage = false);
+    });
+  }
+
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Delete card'),
+            content: const Text('Are you sure to delete the card?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AkatorColors.danger,
+                  foregroundColor: AkatorColors.textInverted,
+                ),
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+    );
+
+    if (confirmed == true) {
+      widget.onDelete();
+    }
   }
 
   @override
@@ -1289,22 +1439,76 @@ class _EditCardSheetState extends State<EditCardSheet> {
               const SizedBox(height: 12),
             ],
             const SizedBox(height: 2),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 160),
+              child:
+                  _showAlreadySavedMessage
+                      ? Padding(
+                        key: const ValueKey('already-saved-message'),
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            'Changes already saved',
+                            style: WalletStyles.captionRegular(
+                              color: AkatorColors.success,
+                            ),
+                          ),
+                        ),
+                      )
+                      : const SizedBox.shrink(
+                        key: ValueKey('already-saved-message-empty'),
+                      ),
+            ),
             SizedBox(
               width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: () {
-                  Navigator.of(context).pop({
-                    for (final entry in _controllers.entries)
-                      entry.key: entry.value.text,
-                  });
-                },
-                icon: const Icon(Icons.check_rounded),
-                label: const Text('Save changes'),
+              child: SaveChangesButton(saved: _saved, onPressed: _handleSave),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AkatorColors.danger,
+                  foregroundColor: AkatorColors.textInverted,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                ),
+                onPressed: _confirmDelete,
+                child: const Text('Delete card'),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class SaveChangesButton extends StatelessWidget {
+  const SaveChangesButton({
+    required this.saved,
+    required this.onPressed,
+    super.key,
+  });
+
+  final bool saved;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton(
+      style: FilledButton.styleFrom(
+        backgroundColor:
+            saved ? AkatorColors.success : AkatorColors.primaryStrong,
+        foregroundColor: AkatorColors.textInverted,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        padding: const EdgeInsets.symmetric(vertical: 13),
+      ),
+      onPressed: onPressed,
+      child: const Text('Save changes'),
     );
   }
 }
@@ -1380,55 +1584,317 @@ Color colorFromHex(String value) {
   return Color(int.parse(withAlpha, radix: 16));
 }
 
-class OverviewSection extends StatelessWidget {
+bool mapsEqual(Map<String, String> first, Map<String, String> second) {
+  if (first.length != second.length) {
+    return false;
+  }
+
+  for (final entry in first.entries) {
+    if (second[entry.key] != entry.value) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+class OverviewFilter {
+  const OverviewFilter({
+    required this.id,
+    required this.label,
+    required this.matchedTypes,
+  });
+
+  final String id;
+  final String label;
+  final Set<WalletCardType> matchedTypes;
+}
+
+const overviewFilters = [
+  OverviewFilter(
+    id: 'passport_id',
+    label: 'passport/IDs',
+    matchedTypes: {WalletCardType.personalId},
+  ),
+  OverviewFilter(
+    id: 'credit_debit_cards',
+    label: 'credit/debit cards',
+    matchedTypes: {WalletCardType.creditCard},
+  ),
+  OverviewFilter(
+    id: 'student_ids',
+    label: 'student IDs',
+    matchedTypes: {WalletCardType.studentId},
+  ),
+  OverviewFilter(
+    id: 'health_insurance',
+    label: 'health insurance',
+    matchedTypes: {WalletCardType.healthInsurance},
+  ),
+  OverviewFilter(
+    id: 'loyalty_cards',
+    label: 'loyalty cards',
+    matchedTypes: {WalletCardType.loyaltyCard},
+  ),
+  OverviewFilter(
+    id: 'driver_licenses',
+    label: 'driver licenses',
+    matchedTypes: {WalletCardType.drivingLicense},
+  ),
+];
+
+class OverviewSection extends StatefulWidget {
   const OverviewSection({
     required this.expanded,
+    required this.bundle,
     required this.onToggle,
+    required this.onView,
     super.key,
   });
 
   final bool expanded;
+  final WalletCardBundle? bundle;
   final VoidCallback onToggle;
+  final void Function(WalletCard card, CardTemplate template) onView;
+
+  @override
+  State<OverviewSection> createState() => _OverviewSectionState();
+}
+
+class _OverviewSectionState extends State<OverviewSection> {
+  final Set<String> _selectedFilterIds = {};
+
+  @override
+  void didUpdateWidget(OverviewSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final bundle = widget.bundle;
+    if (bundle == null) {
+      return;
+    }
+
+    final visibleIds =
+        visibleOverviewFilters(bundle.cards).map((filter) => filter.id).toSet();
+    _selectedFilterIds.removeWhere((id) => !visibleIds.contains(id));
+  }
+
+  void _toggleFilter(OverviewFilter filter) {
+    setState(() {
+      if (_selectedFilterIds.contains(filter.id)) {
+        _selectedFilterIds.remove(filter.id);
+      } else {
+        _selectedFilterIds.add(filter.id);
+      }
+    });
+  }
+
+  List<WalletCard> _filteredCards(List<WalletCard> cards) {
+    if (_selectedFilterIds.isEmpty) {
+      return cards;
+    }
+
+    final selectedTypes = {
+      for (final filter in overviewFilters)
+        if (_selectedFilterIds.contains(filter.id)) ...filter.matchedTypes,
+    };
+
+    return cards.where((card) => selectedTypes.contains(card.type)).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final bundle = widget.bundle;
+    final cards =
+        bundle == null ? <WalletCard>[] : _filteredCards(bundle.cards);
+    final filters =
+        bundle == null
+            ? <OverviewFilter>[]
+            : visibleOverviewFilters(bundle.cards);
+
     return WalletSection(
       sectionLabel: 'Section 2',
       title: 'Overview',
-      expanded: expanded,
-      onToggle: onToggle,
+      expanded: widget.expanded,
+      onToggle: widget.onToggle,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Wrap(
+          Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              OverviewChip(label: 'passport/ID'),
-              OverviewChip(label: 'health insurance'),
-              OverviewChip(label: 'loyalty cards'),
-              OverviewChip(label: 'driver license'),
+              for (final filter in filters)
+                OverviewFilterChip(
+                  filter: filter,
+                  selected: _selectedFilterIds.contains(filter.id),
+                  onSelected: () => _toggleFilter(filter),
+                ),
             ],
           ),
           const SizedBox(height: 16),
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 1.85,
-            children: const [
-              OverviewCard(label: 'card 01'),
-              OverviewCard(label: 'card 02'),
-              OverviewCard(label: 'card 03'),
-              OverviewCard(label: 'card 04'),
-              OverviewCard(label: 'card 05'),
-              AddCardButton(),
-            ],
-          ),
+          if (bundle == null)
+            const FavoriteCarouselSkeleton()
+          else
+            OverviewCardGrid(
+              cards: cards,
+              bundle: bundle,
+              onView: widget.onView,
+            ),
         ],
       ),
+    );
+  }
+}
+
+List<OverviewFilter> visibleOverviewFilters(List<WalletCard> cards) {
+  final availableTypes = cards.map((card) => card.type).toSet();
+
+  return [
+    for (final filter in overviewFilters)
+      if (filter.matchedTypes.any(availableTypes.contains)) filter,
+  ];
+}
+
+class OverviewCardGrid extends StatelessWidget {
+  const OverviewCardGrid({
+    required this.cards,
+    required this.bundle,
+    required this.onView,
+    super.key,
+  });
+
+  final List<WalletCard> cards;
+  final WalletCardBundle bundle;
+  final void Function(WalletCard card, CardTemplate template) onView;
+
+  @override
+  Widget build(BuildContext context) {
+    if (cards.isEmpty) {
+      return const OverviewEmptyState();
+    }
+
+    return GridView.count(
+      key: const ValueKey('overview-card-grid'),
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: 2,
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      childAspectRatio: 1.85,
+      children: [
+        for (final card in cards)
+          OverviewCardTile(
+            card: card,
+            template: bundle.templateFor(card.type),
+            onView: () => onView(card, bundle.templateFor(card.type)),
+          ),
+        const AddCardButton(),
+      ],
+    );
+  }
+}
+
+class OverviewCardTile extends StatelessWidget {
+  const OverviewCardTile({
+    required this.card,
+    required this.template,
+    required this.onView,
+    super.key,
+  });
+
+  final WalletCard card;
+  final CardTemplate template;
+  final VoidCallback onView;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'View ${card.title}',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: ValueKey('view-overview-card-${card.id}'),
+          borderRadius: BorderRadius.circular(8),
+          onTap: onView,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: AkatorColors.backgroundNorm,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AkatorColors.appBarDividerColor),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: SizedBox(
+                      width: 50,
+                      height: 32,
+                      child: Image.asset(card.primaryImage, fit: BoxFit.cover),
+                    ),
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          card.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: WalletStyles.body2Medium(
+                            color: AkatorColors.textNorm,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          template.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: WalletStyles.captionRegular(
+                            color: AkatorColors.textWeak,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class OverviewEmptyState extends StatelessWidget {
+  const OverviewEmptyState({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: AkatorColors.backgroundNorm,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AkatorColors.appBarDividerColor),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+            child: Text(
+              'No cards match these filters',
+              textAlign: TextAlign.center,
+              style: WalletStyles.body2Medium(color: AkatorColors.textWeak),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        const Align(alignment: Alignment.centerRight, child: AddCardButton()),
+      ],
     );
   }
 }
@@ -1724,48 +2190,40 @@ class SectionToggleButton extends StatelessWidget {
   }
 }
 
-class OverviewChip extends StatelessWidget {
-  const OverviewChip({required this.label, super.key});
+class OverviewFilterChip extends StatelessWidget {
+  const OverviewFilterChip({
+    required this.filter,
+    required this.selected,
+    required this.onSelected,
+    super.key,
+  });
 
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: AkatorColors.backgroundNorm,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AkatorColors.appBarDividerColor),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        child: Text(
-          label,
-          style: WalletStyles.body2Medium(color: AkatorColors.textWeak),
-        ),
-      ),
-    );
-  }
-}
-
-class OverviewCard extends StatelessWidget {
-  const OverviewCard({required this.label, super.key});
-
-  final String label;
+  final OverviewFilter filter;
+  final bool selected;
+  final VoidCallback onSelected;
 
   @override
   Widget build(BuildContext context) {
-    return FilledButton.tonal(
-      style: FilledButton.styleFrom(
-        backgroundColor: AkatorColors.backgroundNorm,
-        foregroundColor: AkatorColors.textNorm,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    return FilterChip(
+      key: ValueKey('overview-filter-${filter.id}'),
+      label: Text(filter.label),
+      selected: selected,
+      showCheckmark: false,
+      onSelected: (_) => onSelected(),
+      labelStyle: WalletStyles.body2Medium(
+        color: selected ? AkatorColors.primaryStrong : AkatorColors.textWeak,
       ),
-      onPressed: () {},
-      child: Text(
-        label,
-        style: WalletStyles.body1Medium(color: AkatorColors.textNorm),
+      backgroundColor: AkatorColors.backgroundNorm,
+      selectedColor: AkatorColors.primarySoft,
+      side: BorderSide(
+        color:
+            selected
+                ? AkatorColors.primaryStrong
+                : AkatorColors.appBarDividerColor,
       ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
     );
   }
 }
@@ -1776,6 +2234,7 @@ class AddCardButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
+      key: const ValueKey('overview-add-card'),
       child: IconButton.filled(
         tooltip: 'Add card',
         style: IconButton.styleFrom(
@@ -2014,6 +2473,7 @@ class AkatorColors {
   static const primaryBorder = Color(0xFFBFDBFE);
   static const success = Color(0xFF16A34A);
   static const successBorder = Color(0xFF15803D);
+  static const danger = Color(0xFFDC2626);
   static const loadingShadow = Color(0x223370E4);
   static const drawerBackground = Color(0xFF1E3A8A);
   static const drawerTextWeak = Color(0xFFBFDBFE);
