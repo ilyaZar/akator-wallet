@@ -1,0 +1,79 @@
+{
+  "cards": [
+    {
+      "id": "demo-credit-card",
+      "type": "credit_card",
+      "title": "Akator Blue",
+      "subtitle": "Credit card",
+      "image": "assets/cards/credit_card.png",
+      "images": [
+        "assets/cards/credit_card.png",
+        "assets/cards/credit_card_2.png",
+        "assets/cards/credit_card_3.png",
+        "assets/cards/credit_card_4.png"
+      ],
+      "accent": "#3370E4",
+      "fields": {
+        "name": "John Doe",
+        "expiration_date": "12/29",
+        "card_number": "4242 4242 4242 4242",
+        "cvc": "123"
+      },
+      "asset_source": {
+        "title": "CC 2.png",
+        "url": "https://commons.wikimedia.org/wiki/File:CC_2.png",
+        "credit": "Jed1571, CC BY 3.0"
+      }
+    },
+    {
+      "id": "demo-student-id",
+      "type": "student_id",
+      "title": "Campus ID",
+      "subtitle": "Student ID",
+      "image": "assets/cards/student_id.jpg",
+      "images": [
+        "assets/cards/student_id.jpg",
+        "assets/cards/student_id_2.jpg",
+        "assets/cards/student_id_3.jpg",
+        "assets/cards/student_id_4.jpg"
+      ],
+      "accent": "#2563EB",
+      "fields": {
+        "full_name": "Jane Student",
+        "school": "Akator Academy",
+        "student_number": "ST-2042",
+        "valid_until": "2029-09-30"
+      },
+      "asset_source": {
+        "title": "1958 Allentown High School Student Identification Card",
+        "url": "https://commons.wikimedia.org/wiki/File:1958_-_Allentown_High_School_-_Student_Identification_Card_-_Allentown_PA.jpg",
+        "credit": "public domain"
+      }
+    },
+    {
+      "id": "demo-personal-id",
+      "type": "personal_id",
+      "title": "Personal ID",
+      "subtitle": "Identity document",
+      "image": "assets/cards/personal_id.jpg",
+      "images": [
+        "assets/cards/personal_id.jpg",
+        "assets/cards/personal_id_2.jpg",
+        "assets/cards/personal_id_3.jpg",
+        "assets/cards/personal_id_4.jpg"
+      ],
+      "accent": "#1E3A8A",
+      "fields": {
+        "full_name": "John Doe",
+        "document_number": "ID-000-2042",
+        "date_of_birth": "1994-04-18",
+        "expires_on": "2030-04-18"
+      },
+      "asset_source": {
+        "title": "Identity card of the State of California sample",
+        "url": "https://commons.wikimedia.org/wiki/File:Identity_card_of_the_State_of_Califorinia,_sample_(2010).jpg",
+        "credit": "California DMV, public domain"
+      }
+    }
+  ]
+}
