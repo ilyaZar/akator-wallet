@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'wallet_card_store.dart';
+
 void main() {
   runApp(const AkatorWalletApp());
 }
@@ -191,7 +193,7 @@ class WalletDashboard extends StatelessWidget {
   }
 }
 
-class FavoritesSection extends StatelessWidget {
+class FavoritesSection extends StatefulWidget {
   const FavoritesSection({
     required this.expanded,
     required this.onToggle,
@@ -202,26 +204,1180 @@ class FavoritesSection extends StatelessWidget {
   final VoidCallback onToggle;
 
   @override
+  State<FavoritesSection> createState() => _FavoritesSectionState();
+}
+
+class _FavoritesSectionState extends State<FavoritesSection> {
+  late final PageController _pageController;
+  WalletCardBundle? _cardBundle;
+  int _selectedIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(viewportFraction: 0.78);
+    _loadCards();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadCards() async {
+    final bundle = await const WalletCardStore().load();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _cardBundle = bundle);
+  }
+
+  Future<void> _editCard(WalletCard card, CardTemplate template) async {
+    final updatedFields = await showModalBottomSheet<Map<String, String>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AkatorColors.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (context) => EditCardSheet(card: card, template: template),
+    );
+
+    if (updatedFields == null || _cardBundle == null) {
+      return;
+    }
+
+    final cards = [..._cardBundle!.cards];
+    final index = cards.indexWhere((item) => item.id == card.id);
+    if (index == -1) {
+      return;
+    }
+
+    cards[index] = card.copyWith(fields: updatedFields);
+    setState(() {
+      _cardBundle = WalletCardBundle(
+        templates: _cardBundle!.templates,
+        cards: cards,
+      );
+    });
+  }
+
+  WalletCard _setMainImage(WalletCard card, String image) {
+    final updatedCard = card.withPrimaryImage(image);
+
+    if (_cardBundle == null) {
+      return updatedCard;
+    }
+
+    final cards = [..._cardBundle!.cards];
+    final index = cards.indexWhere((item) => item.id == card.id);
+    if (index == -1) {
+      return updatedCard;
+    }
+
+    cards[index] = updatedCard;
+    setState(() {
+      _cardBundle = WalletCardBundle(
+        templates: _cardBundle!.templates,
+        cards: cards,
+      );
+    });
+
+    return updatedCard;
+  }
+
+  void _viewCard(WalletCard card, CardTemplate template) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AkatorColors.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder:
+          (context) => CardDetailSheet(
+            card: card,
+            template: template,
+            onSetMainImage: _setMainImage,
+            onEdit: (currentCard) {
+              Navigator.of(context).pop();
+              _editCard(currentCard, template);
+            },
+          ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     return WalletSection(
       sectionLabel: 'Section 1',
       title: 'My favorites',
-      expanded: expanded,
-      onToggle: onToggle,
-      child: SizedBox(
-        height: 126,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: const [
-            Positioned(left: 108, top: 34, child: CardStub(width: 116)),
-            Positioned(left: 62, top: 22, child: CardStub(width: 112)),
-            Positioned(left: 18, top: 10, child: CardStub(width: 128)),
-            Positioned(right: 12, top: 38, child: FavoriteCardHandle()),
+      expanded: widget.expanded,
+      onToggle: widget.onToggle,
+      child: buildCardsContent(),
+    );
+  }
+
+  Widget buildCardsContent() {
+    final bundle = _cardBundle;
+    if (bundle == null || bundle.cards.isEmpty) {
+      return const FavoriteCarouselSkeleton();
+    }
+
+    final selectedIndex =
+        _selectedIndex.clamp(0, bundle.cards.length - 1).toInt();
+
+    return FavoriteCardCarousel(
+      bundle: bundle,
+      selectedIndex: selectedIndex,
+      controller: _pageController,
+      onPageChanged: (index) {
+        setState(() => _selectedIndex = index);
+      },
+      onView: _viewCard,
+    );
+  }
+}
+
+class FavoriteCardCarousel extends StatelessWidget {
+  const FavoriteCardCarousel({
+    required this.bundle,
+    required this.selectedIndex,
+    required this.controller,
+    required this.onPageChanged,
+    required this.onView,
+    super.key,
+  });
+
+  final WalletCardBundle bundle;
+  final int selectedIndex;
+  final PageController controller;
+  final ValueChanged<int> onPageChanged;
+  final void Function(WalletCard card, CardTemplate template) onView;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedCard = bundle.cards[selectedIndex];
+    final selectedTemplate = bundle.templateFor(selectedCard.type);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: 190,
+          child: PageView.builder(
+            controller: controller,
+            itemCount: bundle.cards.length,
+            onPageChanged: onPageChanged,
+            itemBuilder: (context, index) {
+              return FavoriteCardPage(
+                card: bundle.cards[index],
+                index: index,
+                selectedIndex: selectedIndex,
+                controller: controller,
+                onView:
+                    () => onView(
+                      bundle.cards[index],
+                      bundle.templateFor(bundle.cards[index].type),
+                    ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 10),
+        Center(
+          child: FavoriteCardDots(
+            count: bundle.cards.length,
+            selectedIndex: selectedIndex,
+          ),
+        ),
+        const SizedBox(height: 14),
+        SelectedCardSummary(
+          card: selectedCard,
+          template: selectedTemplate,
+          onView: () => onView(selectedCard, selectedTemplate),
+        ),
+      ],
+    );
+  }
+}
+
+class FavoriteCardPage extends StatelessWidget {
+  const FavoriteCardPage({
+    required this.card,
+    required this.index,
+    required this.selectedIndex,
+    required this.controller,
+    required this.onView,
+    super.key,
+  });
+
+  final WalletCard card;
+  final int index;
+  final int selectedIndex;
+  final PageController controller;
+  final VoidCallback onView;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, child) {
+        final page = currentCarouselPage(controller, selectedIndex);
+        final distance = (page - index).abs().clamp(0.0, 1.0);
+        final scale = 1 - (distance * 0.08);
+        final lift = distance * 10;
+
+        return Transform.translate(
+          offset: Offset(0, lift),
+          child: Transform.scale(scale: scale, child: child),
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        child: FavoriteCardFace(card: card, onView: onView),
+      ),
+    );
+  }
+}
+
+class FavoriteCardFace extends StatelessWidget {
+  const FavoriteCardFace({required this.card, required this.onView, super.key});
+
+  final WalletCard card;
+  final VoidCallback onView;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = colorFromHex(card.accent);
+
+    return Tooltip(
+      message: 'View ${card.title}',
+      child: Semantics(
+        label: 'View ${card.title}',
+        button: true,
+        child: GestureDetector(
+          key: ValueKey('view-card-image-${card.id}'),
+          onTap: onView,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: const [
+                BoxShadow(
+                  color: AkatorColors.loadingShadow,
+                  blurRadius: 22,
+                  offset: Offset(0, 14),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: AspectRatio(
+                aspectRatio: 1.58,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.asset(card.primaryImage, fit: BoxFit.cover),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            accent.withAlpha(20),
+                            Colors.transparent,
+                            Colors.black.withAlpha(165),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 16,
+                      right: 16,
+                      bottom: 14,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            card.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: WalletStyles.body1Medium(
+                              color: AkatorColors.textInverted,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            card.subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: WalletStyles.captionRegular(
+                              color: AkatorColors.textInverted.withAlpha(220),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class CardDetailSheet extends StatefulWidget {
+  const CardDetailSheet({
+    required this.card,
+    required this.template,
+    required this.onSetMainImage,
+    required this.onEdit,
+    super.key,
+  });
+
+  final WalletCard card;
+  final CardTemplate template;
+  final WalletCard Function(WalletCard card, String image) onSetMainImage;
+  final ValueChanged<WalletCard> onEdit;
+
+  @override
+  State<CardDetailSheet> createState() => _CardDetailSheetState();
+}
+
+class _CardDetailSheetState extends State<CardDetailSheet> {
+  late WalletCard _card;
+
+  @override
+  void initState() {
+    super.initState();
+    _card = widget.card;
+  }
+
+  @override
+  void didUpdateWidget(CardDetailSheet oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.card.id != widget.card.id) {
+      _card = widget.card;
+    }
+  }
+
+  void _previewImage(String image) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AkatorColors.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder:
+          (sheetContext) => CardImagePreviewSheet(
+            card: _card,
+            image: image,
+            onSetMainImage: () {
+              final updatedCard = widget.onSetMainImage(_card, image);
+              if (mounted) {
+                setState(() => _card = updatedCard);
+              }
+              return updatedCard;
+            },
+          ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final images = _card.images.take(4).toList();
+
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.75,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _card.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: WalletStyles.subheadline(
+                          color: AkatorColors.textNorm,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        widget.template.label,
+                        style: WalletStyles.captionRegular(
+                          color: AkatorColors.textWeak,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close card view',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 360),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: AspectRatio(
+                            aspectRatio: 1.58,
+                            child: Image.asset(
+                              _card.primaryImage,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (images.isNotEmpty)
+                      CardImageSelectorRow(
+                        card: _card,
+                        images: images,
+                        onSelect: _previewImage,
+                      ),
+                    const SizedBox(height: 18),
+                    for (final field in widget.template.fields) ...[
+                      ReadOnlyFieldRow(
+                        field: field,
+                        value: _card.fields[field.key] ?? '',
+                      ),
+                      if (field != widget.template.fields.last)
+                        const Divider(
+                          height: 22,
+                          color: AkatorColors.appBarDividerColor,
+                        ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: IconButton.filled(
+                tooltip: 'Edit ${_card.title}',
+                style: IconButton.styleFrom(
+                  fixedSize: const Size(52, 52),
+                  backgroundColor: AkatorColors.primaryStrong,
+                  foregroundColor: AkatorColors.textInverted,
+                ),
+                onPressed: () => widget.onEdit(_card),
+                icon: const Icon(Icons.edit_rounded),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
+}
+
+class CardImageSelectorRow extends StatelessWidget {
+  const CardImageSelectorRow({
+    required this.card,
+    required this.images,
+    required this.onSelect,
+    super.key,
+  });
+
+  final WalletCard card;
+  final List<String> images;
+  final ValueChanged<String> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 58,
+      child: Row(
+        children: [
+          for (var index = 0; index < images.length; index++) ...[
+            if (index > 0) const SizedBox(width: 8),
+            Expanded(
+              child: CardImageThumbnail(
+                cardId: card.id,
+                image: images[index],
+                index: index,
+                selected: images[index] == card.primaryImage,
+                onTap: () => onSelect(images[index]),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class CardImageThumbnail extends StatelessWidget {
+  const CardImageThumbnail({
+    required this.cardId,
+    required this.image,
+    required this.index,
+    required this.selected,
+    required this.onTap,
+    super.key,
+  });
+
+  final String cardId;
+  final String image;
+  final int index;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Preview image ${index + 1}',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: ValueKey('card-image-thumb-$cardId-$index'),
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: AkatorColors.backgroundNorm,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color:
+                    selected
+                        ? AkatorColors.primaryStrong
+                        : AkatorColors.appBarDividerColor,
+                width: selected ? 2 : 1,
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(2),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.asset(image, fit: BoxFit.cover),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class CardImagePreviewSheet extends StatefulWidget {
+  const CardImagePreviewSheet({
+    required this.card,
+    required this.image,
+    required this.onSetMainImage,
+    super.key,
+  });
+
+  final WalletCard card;
+  final String image;
+  final WalletCard Function() onSetMainImage;
+
+  @override
+  State<CardImagePreviewSheet> createState() => _CardImagePreviewSheetState();
+}
+
+class _CardImagePreviewSheetState extends State<CardImagePreviewSheet> {
+  late bool _isMainImage;
+  bool _showAlreadySetMessage = false;
+  int _messageVersion = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _isMainImage = widget.card.primaryImage == widget.image;
+  }
+
+  @override
+  void didUpdateWidget(CardImagePreviewSheet oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.card.id != widget.card.id ||
+        oldWidget.image != widget.image) {
+      _isMainImage = widget.card.primaryImage == widget.image;
+      _showAlreadySetMessage = false;
+    }
+  }
+
+  void _handleSetMainImage() {
+    if (_isMainImage) {
+      _showAlreadySetNotice();
+      return;
+    }
+
+    final updatedCard = widget.onSetMainImage();
+    setState(() {
+      _isMainImage = updatedCard.primaryImage == widget.image;
+      _showAlreadySetMessage = false;
+      _messageVersion++;
+    });
+  }
+
+  void _showAlreadySetNotice() {
+    final version = ++_messageVersion;
+    setState(() => _showAlreadySetMessage = true);
+
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!mounted || version != _messageVersion) {
+        return;
+      }
+      setState(() => _showAlreadySetMessage = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final imageIndex = widget.card.images.indexOf(widget.image) + 1;
+
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.62,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${widget.card.title} image $imageIndex',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: WalletStyles.subheadline(
+                      color: AkatorColors.textNorm,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close image preview',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: Center(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.asset(widget.image, fit: BoxFit.contain),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 160),
+              child:
+                  _showAlreadySetMessage
+                      ? Padding(
+                        key: const ValueKey('already-set-message'),
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            'already set as main image',
+                            style: WalletStyles.captionRegular(
+                              color: AkatorColors.success,
+                            ),
+                          ),
+                        ),
+                      )
+                      : const SizedBox.shrink(
+                        key: ValueKey('already-set-message-empty'),
+                      ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: MainImageButton(
+                key: ValueKey('set-main-image-${widget.card.id}'),
+                isMainImage: _isMainImage,
+                onPressed: _handleSetMainImage,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class MainImageButton extends StatelessWidget {
+  const MainImageButton({
+    required this.isMainImage,
+    required this.onPressed,
+    super.key,
+  });
+
+  final bool isMainImage;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = FilledButton.styleFrom(
+      backgroundColor:
+          isMainImage ? AkatorColors.success : AkatorColors.backgroundNorm,
+      foregroundColor:
+          isMainImage ? AkatorColors.textInverted : AkatorColors.textNorm,
+      side: BorderSide(
+        color:
+            isMainImage
+                ? AkatorColors.successBorder
+                : AkatorColors.appBarDividerColor,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    );
+
+    if (isMainImage) {
+      return FilledButton.icon(
+        style: style,
+        onPressed: onPressed,
+        icon: const Icon(Icons.check_rounded),
+        label: const Text('Main image'),
+      );
+    }
+
+    return FilledButton(
+      style: style,
+      onPressed: onPressed,
+      child: const Text('Set as main image'),
+    );
+  }
+}
+
+class ReadOnlyFieldRow extends StatelessWidget {
+  const ReadOnlyFieldRow({required this.field, required this.value, super.key});
+
+  final CardFieldTemplate field;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final sensitive = isSensitiveField(field);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 128,
+          child: Text(
+            field.label,
+            style: WalletStyles.body2Medium(color: AkatorColors.textHint),
+          ),
+        ),
+        Expanded(
+          child:
+              sensitive
+                  ? SensitiveReadOnlyValue(field: field, value: value)
+                  : Text(
+                    value,
+                    style: WalletStyles.body1Medium(
+                      color: AkatorColors.textNorm,
+                    ),
+                  ),
+        ),
+      ],
+    );
+  }
+}
+
+class SensitiveReadOnlyValue extends StatefulWidget {
+  const SensitiveReadOnlyValue({
+    required this.field,
+    required this.value,
+    super.key,
+  });
+
+  final CardFieldTemplate field;
+  final String value;
+
+  @override
+  State<SensitiveReadOnlyValue> createState() => _SensitiveReadOnlyValueState();
+}
+
+class _SensitiveReadOnlyValueState extends State<SensitiveReadOnlyValue> {
+  bool _visible = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            _visible ? widget.value : '***',
+            style: WalletStyles.body1Medium(color: AkatorColors.textNorm),
+          ),
+        ),
+        HoldToRevealButton(
+          revealKey: ValueKey('hold-view-${widget.field.key}'),
+          label: widget.field.label,
+          onChanged: (visible) => setState(() => _visible = visible),
+        ),
+      ],
+    );
+  }
+}
+
+class SelectedCardSummary extends StatelessWidget {
+  const SelectedCardSummary({
+    required this.card,
+    required this.template,
+    required this.onView,
+    super.key,
+  });
+
+  final WalletCard card;
+  final CardTemplate template;
+  final VoidCallback onView;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'View ${card.title}',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: ValueKey('view-card-summary-${card.id}'),
+          borderRadius: BorderRadius.circular(8),
+          onTap: onView,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: AkatorColors.backgroundNorm,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AkatorColors.appBarDividerColor),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      card.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: WalletStyles.body1Medium(
+                        color: AkatorColors.textNorm,
+                      ),
+                    ),
+                  ),
+                  CardTypeBadge(label: template.label),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class SensitiveFieldText extends StatefulWidget {
+  const SensitiveFieldText({
+    required this.field,
+    required this.controller,
+    super.key,
+  });
+
+  final CardFieldTemplate field;
+  final TextEditingController controller;
+
+  @override
+  State<SensitiveFieldText> createState() => _SensitiveFieldTextState();
+}
+
+class _SensitiveFieldTextState extends State<SensitiveFieldText> {
+  bool _visible = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final sensitive = isSensitiveField(widget.field);
+
+    return TextField(
+      controller: widget.controller,
+      keyboardType: keyboardForField(widget.field),
+      obscureText: sensitive && !_visible,
+      decoration: InputDecoration(
+        labelText: widget.field.label,
+        border: const OutlineInputBorder(),
+        suffixIcon:
+            sensitive
+                ? HoldToRevealButton(
+                  revealKey: ValueKey('hold-edit-${widget.field.key}'),
+                  label: widget.field.label,
+                  onChanged: (visible) => setState(() => _visible = visible),
+                )
+                : null,
+      ),
+    );
+  }
+}
+
+class HoldToRevealButton extends StatelessWidget {
+  const HoldToRevealButton({
+    required this.revealKey,
+    required this.label,
+    required this.onChanged,
+    super.key,
+  });
+
+  final Key revealKey;
+  final String label;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Hold to show $label',
+      child: Semantics(
+        button: true,
+        label: 'Hold to show $label',
+        child: Listener(
+          key: revealKey,
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: (_) => onChanged(true),
+          onPointerUp: (_) => onChanged(false),
+          onPointerCancel: (_) => onChanged(false),
+          child: const SizedBox(
+            width: 48,
+            height: 48,
+            child: Icon(Icons.info_outline_rounded),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class FavoriteCardDots extends StatelessWidget {
+  const FavoriteCardDots({
+    required this.count,
+    required this.selectedIndex,
+    super.key,
+  });
+
+  final int count;
+  final int selectedIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < count; i++)
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            width: i == selectedIndex ? 18 : 7,
+            height: 7,
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            decoration: BoxDecoration(
+              color:
+                  i == selectedIndex
+                      ? AkatorColors.primaryStrong
+                      : AkatorColors.primaryBorder,
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class EditCardSheet extends StatefulWidget {
+  const EditCardSheet({required this.card, required this.template, super.key});
+
+  final WalletCard card;
+  final CardTemplate template;
+
+  @override
+  State<EditCardSheet> createState() => _EditCardSheetState();
+}
+
+class _EditCardSheetState extends State<EditCardSheet> {
+  late final Map<String, TextEditingController> _controllers;
+
+  @override
+  void initState() {
+    super.initState();
+    _controllers = {
+      for (final field in widget.template.fields)
+        field.key: TextEditingController(
+          text: widget.card.fields[field.key] ?? '',
+        ),
+    };
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 18, 20, 20 + bottomInset),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Edit ${widget.card.title}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: WalletStyles.subheadline(
+                          color: AkatorColors.textNorm,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        widget.template.label,
+                        style: WalletStyles.captionRegular(
+                          color: AkatorColors.textWeak,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close editor',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            for (final field in widget.template.fields) ...[
+              SensitiveFieldText(
+                field: field,
+                controller: _controllers[field.key]!,
+              ),
+              const SizedBox(height: 12),
+            ],
+            const SizedBox(height: 2),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop({
+                    for (final entry in _controllers.entries)
+                      entry.key: entry.value.text,
+                  });
+                },
+                icon: const Icon(Icons.check_rounded),
+                label: const Text('Save changes'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class FavoriteCarouselSkeleton extends StatelessWidget {
+  const FavoriteCarouselSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AkatorColors.primarySoft,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AkatorColors.primaryBorder),
+      ),
+      child: const SizedBox(height: 190),
+    );
+  }
+}
+
+class CardTypeBadge extends StatelessWidget {
+  const CardTypeBadge({required this.label, super.key});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AkatorColors.primarySoft,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AkatorColors.primaryBorder),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        child: Text(
+          label,
+          style: WalletStyles.captionRegular(color: AkatorColors.primaryStrong),
+        ),
+      ),
+    );
+  }
+}
+
+bool isSensitiveField(CardFieldTemplate field) {
+  return field.key == 'cvc';
+}
+
+TextInputType keyboardForField(CardFieldTemplate field) {
+  return switch (field.input) {
+    'date' || 'month' => TextInputType.datetime,
+    'number' => TextInputType.number,
+    _ => TextInputType.text,
+  };
+}
+
+double currentCarouselPage(PageController controller, int selectedIndex) {
+  if (!controller.hasClients) {
+    return selectedIndex.toDouble();
+  }
+
+  try {
+    return controller.page ?? selectedIndex.toDouble();
+  } on AssertionError {
+    return selectedIndex.toDouble();
+  }
+}
+
+Color colorFromHex(String value) {
+  final normalized = value.replaceFirst('#', '');
+  final withAlpha = normalized.length == 6 ? 'FF$normalized' : normalized;
+
+  return Color(int.parse(withAlpha, radix: 16));
 }
 
 class OverviewSection extends StatelessWidget {
@@ -568,55 +1724,6 @@ class SectionToggleButton extends StatelessWidget {
   }
 }
 
-class CardStub extends StatelessWidget {
-  const CardStub({required this.width, super.key});
-
-  final double width;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: AkatorColors.backgroundSecondary,
-        border: Border.all(color: AkatorColors.primary, width: 1.6),
-        boxShadow: const [
-          BoxShadow(
-            color: AkatorColors.loadingShadow,
-            blurRadius: 18,
-            offset: Offset(0, 10),
-          ),
-        ],
-      ),
-      child: SizedBox(width: width, height: 66),
-    );
-  }
-}
-
-class FavoriteCardHandle extends StatelessWidget {
-  const FavoriteCardHandle({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: AkatorColors.primarySoft,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AkatorColors.primaryBorder),
-      ),
-      child: const SizedBox(
-        width: 64,
-        height: 28,
-        child: Icon(
-          Icons.credit_card_rounded,
-          size: 18,
-          color: AkatorColors.primaryStrong,
-        ),
-      ),
-    );
-  }
-}
-
 class OverviewChip extends StatelessWidget {
   const OverviewChip({required this.label, super.key});
 
@@ -905,6 +2012,8 @@ class AkatorColors {
   static const primaryStrong = Color(0xFF2563EB);
   static const primarySoft = Color(0xFFEFF6FF);
   static const primaryBorder = Color(0xFFBFDBFE);
+  static const success = Color(0xFF16A34A);
+  static const successBorder = Color(0xFF15803D);
   static const loadingShadow = Color(0x223370E4);
   static const drawerBackground = Color(0xFF1E3A8A);
   static const drawerTextWeak = Color(0xFFBFDBFE);
