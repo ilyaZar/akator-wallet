@@ -166,6 +166,21 @@ void main() {
     expect(find.byType(CardDetailSheet), findsOneWidget);
     expect(find.byTooltip('Edit Akator Blue'), findsOneWidget);
     expect(find.byType(CardImageThumbnail), findsNWidgets(4));
+
+    await tester.tap(
+      find.byKey(const ValueKey('zoom-card-main-image-demo-credit-card')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(CardImageZoomView), findsOneWidget);
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('zoom-image-assets/cards/credit_card.png')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byTooltip('Close zoom'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CardDetailSheet), findsOneWidget);
+
     expect(
       tester
           .widgetList<CardImageThumbnail>(find.byType(CardImageThumbnail))
@@ -201,6 +216,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(CardImagePreviewSheet), findsOneWidget);
     expect(find.text('Set as main image'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey('zoom-preview-image-demo-credit-card')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(CardImageZoomView), findsOneWidget);
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('zoom-image-assets/cards/credit_card_2.png')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byTooltip('Close zoom'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CardImagePreviewSheet), findsOneWidget);
+
     expect(
       tester
           .widget<MainImageButton>(
