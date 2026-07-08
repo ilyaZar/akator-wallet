@@ -1,6 +1,6 @@
-# Akata Wallet
+# Akator Wallet
 
-Flutter baseline for the Akata wallet mobile app.
+Flutter baseline for the Akator wallet mobile app.
 
 ## Development
 
