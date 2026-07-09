@@ -4651,7 +4651,7 @@ class _ConnectionsSheetState extends State<ConnectionsSheet> {
                       title: 'Syncthing',
                       detail:
                           'Choose a synced Android folder. No login is stored.',
-                      icon: Icons.sync_rounded,
+                      icon: Icons.cloud_outlined,
                       state: syncthingState,
                       busy: _busy,
                       onSetup: () => _run(widget.onSetupSyncthing),
