@@ -149,6 +149,66 @@
         "url": "https://commons.wikimedia.org/wiki/File:Massachusetts-drivers-license_sample,_2016.jpg",
         "credit": "MA DMV, public domain"
       }
+    },
+    {
+      "id": "demo-dc-library-card",
+      "type": "loyalty_card",
+      "title": "DC Library",
+      "subtitle": "Loyalty card",
+      "image": "assets/cards/loyalty_library_card.jpg",
+      "images": ["assets/cards/loyalty_library_card.jpg"],
+      "accent": "#2563EB",
+      "fields": {
+        "name": "Reader Sample",
+        "program": "DC Public Library",
+        "member_number": "DCPL-2026-1042",
+        "valid_until": "2030-12-31"
+      },
+      "asset_source": {
+        "title": "DC Public Library card.jpg",
+        "url": "https://commons.wikimedia.org/wiki/File:DC_Public_Library_card.jpg",
+        "credit": "Photo by T. Carter Ross; card design/logo public domain textlogo"
+      }
+    },
+    {
+      "id": "demo-customer-loyalty-cards",
+      "type": "loyalty_card",
+      "title": "Shop Stack",
+      "subtitle": "Loyalty card",
+      "image": "assets/cards/loyalty_customer_cards.jpg",
+      "images": ["assets/cards/loyalty_customer_cards.jpg"],
+      "accent": "#0F766E",
+      "fields": {
+        "name": "Jane Member",
+        "program": "Everyday Rewards",
+        "member_number": "SHOP-8842-11",
+        "valid_until": "2029-08-31"
+      },
+      "asset_source": {
+        "title": "Customerloyalitycards.JPG",
+        "url": "https://commons.wikimedia.org/wiki/File:Customerloyalitycards.JPG",
+        "credit": "Wikimedia Commons contributor release to public domain"
+      }
+    },
+    {
+      "id": "demo-delta-skymiles-card",
+      "type": "loyalty_card",
+      "title": "SkyMiles",
+      "subtitle": "Loyalty card",
+      "image": "assets/cards/loyalty_delta_card.jpg",
+      "images": ["assets/cards/loyalty_delta_card.jpg"],
+      "accent": "#1D4ED8",
+      "fields": {
+        "name": "Alex Flyer",
+        "program": "SkyMiles",
+        "member_number": "DL-4242-9000",
+        "valid_until": "2031-01-31"
+      },
+      "asset_source": {
+        "title": "Delta Skymiles membership card.jpg",
+        "url": "https://commons.wikimedia.org/wiki/File:Delta_Skymiles_membership_card.jpg",
+        "credit": "Ishwasafish, public domain"
+      }
     }
   ]
 }

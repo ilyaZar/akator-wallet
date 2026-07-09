@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -13,9 +14,9 @@ void main() {
   runApp(const AkatorWalletApp());
 }
 
-typedef PickCardImage = Future<String?> Function();
+typedef PickCardImage = Future<CardImageRef?> Function();
 
-Future<String?> pickCardImageFromCamera() async {
+Future<CardImageRef?> pickCardImageFromCamera() async {
   final image = await ImagePicker().pickImage(
     source: ImageSource.camera,
     imageQuality: 92,
@@ -26,8 +27,56 @@ Future<String?> pickCardImageFromCamera() async {
     return null;
   }
 
+  final croppedImage = await cropCardImage(image.path);
+  return CardImageRef.localFile(croppedImage?.path ?? image.path);
+}
+
+Future<CroppedFile?> cropCardImage(String sourcePath) {
+  return ImageCropper().cropImage(
+    sourcePath: sourcePath,
+    maxWidth: 2400,
+    maxHeight: 1519,
+    aspectRatio: const CropAspectRatio(ratioX: 158, ratioY: 100),
+    uiSettings: [
+      AndroidUiSettings(
+        toolbarTitle: 'Crop card image',
+        toolbarColor: AkatorColors.primaryStrong,
+        toolbarWidgetColor: AkatorColors.textInverted,
+        activeControlsWidgetColor: AkatorColors.primaryStrong,
+        cropFrameColor: AkatorColors.primaryStrong,
+        cropGridColor: AkatorColors.primaryBorder,
+        backgroundColor: AkatorColors.backgroundNorm,
+        lockAspectRatio: true,
+      ),
+    ],
+  );
+}
+
+Future<CardImageRef?> pickCardImageFromExternal({
+  required AddCardSource source,
+  required String? folderUri,
+}) async {
+  final provider = imageProviderForSource(source);
+  final selection = await ExternalImageBridge.pickImage(initialUri: folderUri);
+  if (selection == null) {
+    return null;
+  }
+
+  final cachedPath = await ExternalImageBridge.cacheImage(
+    selection.uri,
+    selection.displayName,
+  );
+  if (cachedPath == null) {
+    return CardImageRef.externalUri(
+      uri: selection.uri,
+      provider: provider,
+      displayName: selection.displayName,
+      mimeType: selection.mimeType,
+    );
+  }
+
   final croppedImage = await ImageCropper().cropImage(
-    sourcePath: image.path,
+    sourcePath: cachedPath,
     maxWidth: 2400,
     maxHeight: 1519,
     aspectRatio: const CropAspectRatio(ratioX: 158, ratioY: 100),
@@ -45,21 +94,241 @@ Future<String?> pickCardImageFromCamera() async {
     ],
   );
 
-  return croppedImage?.path ?? image.path;
-}
-
-Image walletImage(String path, {Key? key, BoxFit fit = BoxFit.cover}) {
-  if (path.startsWith('assets/')) {
-    return Image.asset(path, key: key, fit: fit);
+  if (croppedImage == null) {
+    return CardImageRef.externalUri(
+      uri: selection.uri,
+      provider: provider,
+      displayName: selection.displayName,
+      mimeType: selection.mimeType,
+    );
   }
 
-  return Image.file(File(path), key: key, fit: fit);
+  final saved = await ExternalImageBridge.saveCroppedImage(
+    provider: provider,
+    folderUri: folderUri,
+    sourceUri: selection.uri,
+    filePath: croppedImage.path,
+    displayName: croppedDisplayName(selection.displayName),
+    mimeType: selection.mimeType,
+  );
+
+  return CardImageRef.externalUri(
+    uri: saved?.uri ?? selection.uri,
+    provider: provider,
+    displayName: saved?.displayName ?? selection.displayName,
+    mimeType: saved?.mimeType ?? selection.mimeType,
+  );
+}
+
+Widget walletImage(CardImageRef image, {Key? key, BoxFit fit = BoxFit.cover}) {
+  if (image.kind == CardImageKind.asset) {
+    return Image.asset(image.uri, key: key, fit: fit);
+  }
+  if (image.kind == CardImageKind.externalUri) {
+    return ExternalWalletImage(image: image, key: key, fit: fit);
+  }
+
+  return Image.file(File(image.uri), key: key, fit: fit);
+}
+
+class ExternalImageSelection {
+  const ExternalImageSelection({
+    required this.uri,
+    required this.displayName,
+    required this.mimeType,
+  });
+
+  final String uri;
+  final String displayName;
+  final String mimeType;
+
+  factory ExternalImageSelection.fromMap(Map<dynamic, dynamic> data) {
+    return ExternalImageSelection(
+      uri: data['uri'] as String,
+      displayName:
+          data['displayName'] as String? ??
+          displayNameForUri(data['uri'] as String),
+      mimeType: data['mimeType'] as String? ?? 'image/*',
+    );
+  }
+}
+
+class ExternalImageBridge {
+  static const _channel = MethodChannel('com.akator.wallet/external_images');
+
+  static Future<bool> isProviderAvailable(CardImageProvider provider) async {
+    if (!Platform.isAndroid) {
+      return false;
+    }
+    return await _channel.invokeMethod<bool>('isExternalProviderAvailable', {
+          'provider': provider.storageKey,
+        }) ??
+        false;
+  }
+
+  static Future<String?> pickSyncthingFolder() async {
+    if (!Platform.isAndroid) {
+      return null;
+    }
+    return _channel.invokeMethod<String>('pickSyncthingFolder');
+  }
+
+  static Future<bool> openProviderFiles(
+    CardImageProvider provider, {
+    String? initialUri,
+  }) async {
+    if (!Platform.isAndroid) {
+      return false;
+    }
+    return await _channel.invokeMethod<bool>('openProviderFiles', {
+          'provider': provider.storageKey,
+          'initialUri': initialUri,
+        }) ??
+        false;
+  }
+
+  static Future<bool> openProviderApp(CardImageProvider provider) async {
+    if (!Platform.isAndroid) {
+      return false;
+    }
+    return await _channel.invokeMethod<bool>('openProviderApp', {
+          'provider': provider.storageKey,
+        }) ??
+        false;
+  }
+
+  static Future<ExternalImageSelection?> pickImage({String? initialUri}) async {
+    if (!Platform.isAndroid) {
+      return null;
+    }
+    final data = await _channel.invokeMapMethod<String, Object?>(
+      'pickExternalImage',
+      {'initialUri': initialUri},
+    );
+    return data == null ? null : ExternalImageSelection.fromMap(data);
+  }
+
+  static Future<String?> cacheImage(String uri, String displayName) async {
+    if (!Platform.isAndroid) {
+      return null;
+    }
+    return _channel.invokeMethod<String>('cacheExternalImage', {
+      'uri': uri,
+      'displayName': displayName,
+    });
+  }
+
+  static Future<ExternalImageSelection?> saveCroppedImage({
+    required CardImageProvider provider,
+    required String? folderUri,
+    required String sourceUri,
+    required String filePath,
+    required String displayName,
+    required String mimeType,
+  }) async {
+    if (!Platform.isAndroid) {
+      return null;
+    }
+    final data = await _channel
+        .invokeMapMethod<String, Object?>('saveCroppedExternalImage', {
+          'provider': provider.storageKey,
+          'folderUri': folderUri,
+          'sourceUri': sourceUri,
+          'filePath': filePath,
+          'displayName': displayName,
+          'mimeType': mimeType,
+        });
+    return data == null ? null : ExternalImageSelection.fromMap(data);
+  }
+
+  static Future<Uint8List?> readImage(String uri) async {
+    if (!Platform.isAndroid) {
+      return null;
+    }
+    return _channel.invokeMethod<Uint8List>('readExternalImage', {'uri': uri});
+  }
+}
+
+final _externalImageCache = <String, Future<Uint8List?>>{};
+
+class ExternalWalletImage extends StatelessWidget {
+  const ExternalWalletImage({
+    required this.image,
+    required this.fit,
+    super.key,
+  });
+
+  final CardImageRef image;
+  final BoxFit fit;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _externalImageCache.putIfAbsent(
+      image.uri,
+      () => ExternalImageBridge.readImage(image.uri),
+    );
+
+    return FutureBuilder<Uint8List?>(
+      future: bytes,
+      builder: (context, snapshot) {
+        final data = snapshot.data;
+        if (data != null) {
+          return Image.memory(data, fit: fit);
+        }
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const ColoredBox(color: AkatorColors.backgroundSecondary);
+        }
+        return const MissingCardImage();
+      },
+    );
+  }
+}
+
+class MissingCardImage extends StatelessWidget {
+  const MissingCardImage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(color: AkatorColors.backgroundSecondary),
+      child: Center(
+        child: Icon(
+          Icons.broken_image_outlined,
+          color: AkatorColors.textHint,
+          size: 28,
+        ),
+      ),
+    );
+  }
+}
+
+CardImageProvider imageProviderForSource(AddCardSource source) {
+  return switch (source) {
+    AddCardSource.image => CardImageProvider.internal,
+    AddCardSource.syncthing => CardImageProvider.syncthing,
+    AddCardSource.protonDrive => CardImageProvider.protonDrive,
+  };
+}
+
+String croppedDisplayName(String displayName) {
+  final dot = displayName.lastIndexOf('.');
+  if (dot <= 0) {
+    return '${displayName}_cropped.jpg';
+  }
+  return '${displayName.substring(0, dot)}_cropped${displayName.substring(dot)}';
 }
 
 class AkatorWalletApp extends StatelessWidget {
-  const AkatorWalletApp({this.pickCardImage, super.key});
+  const AkatorWalletApp({
+    this.pickCardImage,
+    this.cardStore,
+    this.connectionStore,
+    super.key,
+  });
 
   final PickCardImage? pickCardImage;
+  final WalletCardStore? cardStore;
+  final WalletConnectionStore? connectionStore;
 
   @override
   Widget build(BuildContext context) {
@@ -78,15 +347,26 @@ class AkatorWalletApp extends StatelessWidget {
           displayColor: AkatorColors.textNorm,
         ),
       ),
-      home: WalletHomeScreen(pickCardImage: pickCardImage),
+      home: WalletHomeScreen(
+        pickCardImage: pickCardImage,
+        cardStore: cardStore,
+        connectionStore: connectionStore,
+      ),
     );
   }
 }
 
 class WalletHomeScreen extends StatefulWidget {
-  const WalletHomeScreen({this.pickCardImage, super.key});
+  const WalletHomeScreen({
+    this.pickCardImage,
+    this.cardStore,
+    this.connectionStore,
+    super.key,
+  });
 
   final PickCardImage? pickCardImage;
+  final WalletCardStore? cardStore;
+  final WalletConnectionStore? connectionStore;
 
   @override
   State<WalletHomeScreen> createState() => _WalletHomeScreenState();
@@ -94,9 +374,230 @@ class WalletHomeScreen extends StatefulWidget {
 
 class _WalletHomeScreenState extends State<WalletHomeScreen> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
+  late final WalletConnectionStore _connectionStore;
+  WalletConnections _connections = const WalletConnections();
+  bool _syncthingAvailable = false;
+  bool _protonDriveAvailable = false;
   bool _section1Open = true;
   bool _section2Open = true;
   bool _section3Open = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _connectionStore = widget.connectionStore ?? const WalletConnectionStore();
+    _refreshConnections();
+  }
+
+  Future<ConnectionSnapshot> _refreshConnections() async {
+    final results = await Future.wait([
+      _connectionStore.load(),
+      ExternalImageBridge.isProviderAvailable(CardImageProvider.syncthing),
+      ExternalImageBridge.isProviderAvailable(CardImageProvider.protonDrive),
+    ]);
+    final connections = results[0] as WalletConnections;
+    final syncthingAvailable = results[1] as bool;
+    final protonDriveAvailable = results[2] as bool;
+
+    if (mounted) {
+      setState(() {
+        _connections = connections;
+        _syncthingAvailable = syncthingAvailable;
+        _protonDriveAvailable = protonDriveAvailable;
+      });
+    }
+
+    return ConnectionSnapshot(
+      connections: connections,
+      syncthingAvailable: syncthingAvailable,
+      protonDriveAvailable: protonDriveAvailable,
+    );
+  }
+
+  Future<ConnectionSnapshot> _saveConnections(
+    WalletConnections connections,
+  ) async {
+    await _connectionStore.save(connections);
+    if (mounted) {
+      setState(() => _connections = connections);
+    }
+    return _refreshConnections();
+  }
+
+  Future<ConnectionActionResult> _setupSyncthingConnection() async {
+    final available = await ExternalImageBridge.isProviderAvailable(
+      CardImageProvider.syncthing,
+    );
+    if (!available) {
+      final snapshot = await _refreshConnections();
+      return ConnectionActionResult(
+        snapshot: snapshot,
+        message: 'Syncthing is not installed on this device',
+      );
+    }
+
+    final folderUri = await ExternalImageBridge.pickSyncthingFolder();
+    if (folderUri == null) {
+      final snapshot = await _refreshConnections();
+      return ConnectionActionResult(snapshot: snapshot);
+    }
+
+    final snapshot = await _saveConnections(
+      _connections.copyWith(syncthingFolderUri: folderUri),
+    );
+    return ConnectionActionResult(
+      snapshot: snapshot,
+      message: 'Syncthing folder connected',
+    );
+  }
+
+  Future<ConnectionActionResult> _setupProtonDriveConnection() async {
+    final available = await ExternalImageBridge.isProviderAvailable(
+      CardImageProvider.protonDrive,
+    );
+    if (!available) {
+      final snapshot = await _refreshConnections();
+      return ConnectionActionResult(
+        snapshot: snapshot,
+        message: 'Proton Drive is not installed on this device',
+      );
+    }
+
+    final snapshot = await _saveConnections(
+      _connections.copyWith(protonDriveConnected: true),
+    );
+    return ConnectionActionResult(
+      snapshot: snapshot,
+      message: 'Proton Drive connected',
+    );
+  }
+
+  Future<ConnectionActionResult> _deleteSyncthingConnection() async {
+    final snapshot = await _saveConnections(
+      _connections.copyWith(clearSyncthingFolderUri: true),
+    );
+    return ConnectionActionResult(
+      snapshot: snapshot,
+      message: 'Syncthing connection removed',
+    );
+  }
+
+  Future<ConnectionActionResult> _deleteProtonDriveConnection() async {
+    final snapshot = await _saveConnections(
+      _connections.copyWith(protonDriveConnected: false),
+    );
+    return ConnectionActionResult(
+      snapshot: snapshot,
+      message: 'Proton Drive connection removed',
+    );
+  }
+
+  Future<ConnectionActionResult> _showSyncthingFiles() {
+    return _showProviderFiles(
+      CardImageProvider.syncthing,
+      folderUri: _connections.syncthingFolderUri,
+      providerName: 'Syncthing',
+    );
+  }
+
+  Future<ConnectionActionResult> _showProtonDriveFiles() {
+    return _showProviderFiles(
+      CardImageProvider.protonDrive,
+      providerName: 'Proton Drive',
+    );
+  }
+
+  Future<ConnectionActionResult> _showProviderFiles(
+    CardImageProvider provider, {
+    required String providerName,
+    String? folderUri,
+  }) async {
+    final opened = await ExternalImageBridge.openProviderFiles(
+      provider,
+      initialUri: folderUri,
+    );
+    final snapshot = await _refreshConnections();
+    return ConnectionActionResult(
+      snapshot: snapshot,
+      message: opened ? null : 'Could not open $providerName files',
+    );
+  }
+
+  Future<ConnectionActionResult> _openSyncthingApp() {
+    return _openProviderApp(
+      CardImageProvider.syncthing,
+      providerName: 'Syncthing',
+    );
+  }
+
+  Future<ConnectionActionResult> _openProtonDriveApp() {
+    return _openProviderApp(
+      CardImageProvider.protonDrive,
+      providerName: 'Proton Drive',
+    );
+  }
+
+  Future<ConnectionActionResult> _openProviderApp(
+    CardImageProvider provider, {
+    required String providerName,
+  }) async {
+    final opened = await ExternalImageBridge.openProviderApp(provider);
+    final snapshot = await _refreshConnections();
+    return ConnectionActionResult(
+      snapshot: snapshot,
+      message: opened ? null : 'Could not open $providerName',
+    );
+  }
+
+  void _updateSyncthingFolderUri(String folderUri) {
+    unawaited(
+      _saveConnections(_connections.copyWith(syncthingFolderUri: folderUri)),
+    );
+  }
+
+  void _markProtonDriveUsed() {
+    if (_connections.protonDriveConnected) {
+      return;
+    }
+    unawaited(
+      _saveConnections(_connections.copyWith(protonDriveConnected: true)),
+    );
+  }
+
+  Future<void> _openConnectionsSheet() async {
+    final snapshot = ConnectionSnapshot(
+      connections: _connections,
+      syncthingAvailable: _syncthingAvailable,
+      protonDriveAvailable: _protonDriveAvailable,
+    );
+    unawaited(_refreshConnections());
+    if (!mounted) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AkatorColors.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder:
+          (context) => ConnectionsSheet(
+            initialSnapshot: snapshot,
+            onSetupSyncthing: _setupSyncthingConnection,
+            onSetupProtonDrive: _setupProtonDriveConnection,
+            onShowSyncthingFiles: _showSyncthingFiles,
+            onShowProtonDriveFiles: _showProtonDriveFiles,
+            onOpenSyncthingApp: _openSyncthingApp,
+            onOpenProtonDriveApp: _openProtonDriveApp,
+            onDeleteSyncthing: _deleteSyncthingConnection,
+            onDeleteProtonDrive: _deleteProtonDriveConnection,
+          ),
+    );
+    unawaited(_refreshConnections());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -106,12 +607,26 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
         onMenuPressed: () => _scaffoldKey.currentState?.openDrawer(),
         onSettingsPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
       ),
-      drawer: WalletMenuDrawer(onClose: () => Navigator.of(context).pop()),
-      endDrawer: WalletSettingsDrawer(
+      drawer: WalletMenuDrawer(
+        connections: _connections,
+        syncthingAvailable: _syncthingAvailable,
+        protonDriveAvailable: _protonDriveAvailable,
         onClose: () => Navigator.of(context).pop(),
+        onConnectionsPressed: _openConnectionsSheet,
+      ),
+      endDrawer: WalletSettingsDrawer(
+        connections: _connections,
+        syncthingAvailable: _syncthingAvailable,
+        protonDriveAvailable: _protonDriveAvailable,
+        onClose: () => Navigator.of(context).pop(),
+        onConnectionsPressed: _openConnectionsSheet,
       ),
       body: WalletDashboard(
         pickCardImage: widget.pickCardImage ?? pickCardImageFromCamera,
+        cardStore: widget.cardStore ?? const WalletCardStore(),
+        syncthingFolderUri: _connections.syncthingFolderUri,
+        onSyncthingFolderPicked: _updateSyncthingFolderUri,
+        onProtonDriveUsed: _markProtonDriveUsed,
         section1Open: _section1Open,
         section2Open: _section2Open,
         section3Open: _section3Open,
@@ -200,10 +715,18 @@ class WalletDashboard extends StatefulWidget {
     required this.onSection1Toggle,
     required this.onSection2Toggle,
     required this.onSection3Toggle,
+    required this.cardStore,
+    required this.syncthingFolderUri,
+    required this.onSyncthingFolderPicked,
+    required this.onProtonDriveUsed,
     super.key,
   });
 
   final PickCardImage pickCardImage;
+  final WalletCardStore cardStore;
+  final String? syncthingFolderUri;
+  final ValueChanged<String> onSyncthingFolderPicked;
+  final VoidCallback onProtonDriveUsed;
   final bool section1Open;
   final bool section2Open;
   final bool section3Open;
@@ -225,7 +748,7 @@ class _WalletDashboardState extends State<WalletDashboard> {
   }
 
   Future<void> _loadCards() async {
-    final bundle = await const WalletCardStore().load();
+    final bundle = await widget.cardStore.load();
     if (!mounted) {
       return;
     }
@@ -273,6 +796,9 @@ class _WalletDashboardState extends State<WalletDashboard> {
           (context) => AddCardSheet(
             bundle: bundle,
             pickCardImage: widget.pickCardImage,
+            syncthingFolderUri: widget.syncthingFolderUri,
+            onSyncthingFolderPicked: widget.onSyncthingFolderPicked,
+            onProtonDriveUsed: widget.onProtonDriveUsed,
             onSave: _insertCard,
           ),
     );
@@ -284,12 +810,11 @@ class _WalletDashboardState extends State<WalletDashboard> {
       return;
     }
 
+    final cards = [...bundle.cards, card];
     setState(() {
-      _cardBundle = WalletCardBundle(
-        templates: bundle.templates,
-        cards: [...bundle.cards, card],
-      );
+      _cardBundle = WalletCardBundle(templates: bundle.templates, cards: cards);
     });
+    unawaited(widget.cardStore.saveCards(cards));
   }
 
   void _saveCardFields(WalletCard card, Map<String, String> fields) {
@@ -308,6 +833,7 @@ class _WalletDashboardState extends State<WalletDashboard> {
     setState(() {
       _cardBundle = WalletCardBundle(templates: bundle.templates, cards: cards);
     });
+    unawaited(widget.cardStore.saveCards(cards));
   }
 
   void _deleteCard(WalletCard card) {
@@ -316,18 +842,17 @@ class _WalletDashboardState extends State<WalletDashboard> {
       return;
     }
 
+    final cards = [
+      for (final item in bundle.cards)
+        if (item.id != card.id) item,
+    ];
     setState(() {
-      _cardBundle = WalletCardBundle(
-        templates: bundle.templates,
-        cards: [
-          for (final item in bundle.cards)
-            if (item.id != card.id) item,
-        ],
-      );
+      _cardBundle = WalletCardBundle(templates: bundle.templates, cards: cards);
     });
+    unawaited(widget.cardStore.saveCards(cards));
   }
 
-  WalletCard _setMainImage(WalletCard card, String image) {
+  WalletCard _setMainImage(WalletCard card, CardImageRef image) {
     final updatedCard = card.withPrimaryImage(image);
 
     if (_cardBundle == null) {
@@ -347,6 +872,7 @@ class _WalletDashboardState extends State<WalletDashboard> {
         cards: cards,
       );
     });
+    unawaited(widget.cardStore.saveCards(cards));
 
     return updatedCard;
   }
@@ -695,7 +1221,7 @@ class CardDetailSheet extends StatefulWidget {
 
   final WalletCard card;
   final CardTemplate template;
-  final WalletCard Function(WalletCard card, String image) onSetMainImage;
+  final WalletCard Function(WalletCard card, CardImageRef image) onSetMainImage;
   final ValueChanged<WalletCard> onEdit;
 
   @override
@@ -719,7 +1245,7 @@ class _CardDetailSheetState extends State<CardDetailSheet> {
     }
   }
 
-  void _previewImage(String image) {
+  void _previewImage(CardImageRef image) {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -743,7 +1269,7 @@ class _CardDetailSheetState extends State<CardDetailSheet> {
     );
   }
 
-  void _zoomImage(String image) {
+  void _zoomImage(CardImageRef image) {
     showCardImageZoom(context, image);
   }
 
@@ -870,8 +1396,8 @@ class CardImageSelectorRow extends StatelessWidget {
   });
 
   final WalletCard card;
-  final List<String> images;
-  final ValueChanged<String> onSelect;
+  final List<CardImageRef> images;
+  final ValueChanged<CardImageRef> onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -908,7 +1434,7 @@ class CardImageThumbnail extends StatelessWidget {
   });
 
   final String cardId;
-  final String image;
+  final CardImageRef image;
   final int index;
   final bool selected;
   final VoidCallback onTap;
@@ -958,7 +1484,7 @@ class CardImagePreviewSheet extends StatefulWidget {
   });
 
   final WalletCard card;
-  final String image;
+  final CardImageRef image;
   final WalletCard Function() onSetMainImage;
 
   @override
@@ -1096,7 +1622,7 @@ class _CardImagePreviewSheetState extends State<CardImagePreviewSheet> {
   }
 }
 
-Future<void> showCardImageZoom(BuildContext context, String image) {
+Future<void> showCardImageZoom(BuildContext context, CardImageRef image) {
   return Navigator.of(context, rootNavigator: true).push<void>(
     MaterialPageRoute(
       fullscreenDialog: true,
@@ -1108,7 +1634,7 @@ Future<void> showCardImageZoom(BuildContext context, String image) {
 class CardImageZoomView extends StatelessWidget {
   const CardImageZoomView({required this.image, super.key});
 
-  final String image;
+  final CardImageRef image;
 
   @override
   Widget build(BuildContext context) {
@@ -1130,7 +1656,7 @@ class CardImageZoomView extends StatelessWidget {
                     child: Center(
                       child: walletImage(
                         image,
-                        key: ValueKey('zoom-image-$image'),
+                        key: ValueKey('zoom-image-${image.uri}'),
                         fit: BoxFit.contain,
                       ),
                     ),
@@ -1280,59 +1806,6 @@ class _SensitiveReadOnlyValueState extends State<SensitiveReadOnlyValue> {
   }
 }
 
-class SelectedCardSummary extends StatelessWidget {
-  const SelectedCardSummary({
-    required this.card,
-    required this.template,
-    required this.onView,
-    super.key,
-  });
-
-  final WalletCard card;
-  final CardTemplate template;
-  final VoidCallback onView;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: 'View ${card.title}',
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          key: ValueKey('view-card-summary-${card.id}'),
-          borderRadius: BorderRadius.circular(8),
-          onTap: onView,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: AkatorColors.backgroundNorm,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AkatorColors.appBarDividerColor),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      card.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: WalletStyles.body1Medium(
-                        color: AkatorColors.textNorm,
-                      ),
-                    ),
-                  ),
-                  CardTypeBadge(label: template.label),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class SensitiveFieldText extends StatefulWidget {
   const SensitiveFieldText({
     required this.field,
@@ -1470,6 +1943,59 @@ class HoldToRevealButton extends StatelessWidget {
             width: 48,
             height: 48,
             child: Icon(Icons.info_outline_rounded),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class SelectedCardSummary extends StatelessWidget {
+  const SelectedCardSummary({
+    required this.card,
+    required this.template,
+    required this.onView,
+    super.key,
+  });
+
+  final WalletCard card;
+  final CardTemplate template;
+  final VoidCallback onView;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'View ${card.title}',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: ValueKey('view-card-summary-${card.id}'),
+          borderRadius: BorderRadius.circular(8),
+          onTap: onView,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: AkatorColors.backgroundNorm,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AkatorColors.appBarDividerColor),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      card.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: WalletStyles.body1Medium(
+                        color: AkatorColors.textNorm,
+                      ),
+                    ),
+                  ),
+                  CardTypeBadge(label: template.label),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -1789,17 +2315,41 @@ String addCardSourceLabel(AddCardSource source) {
   };
 }
 
+String unavailableExternalSourceMessage(AddCardSource source) {
+  return switch (source) {
+    AddCardSource.image => '',
+    AddCardSource.syncthing =>
+      'Syncthing is not installed on this device. Install Syncthing-Fork and sync a local folder first.',
+    AddCardSource.protonDrive =>
+      'Proton Drive is not installed on this device. Install Proton Drive and sign in, then try again.',
+  };
+}
+
+IconData iconForAddSource(AddCardSource source) {
+  return switch (source) {
+    AddCardSource.image => Icons.photo_camera_rounded,
+    AddCardSource.syncthing => Icons.sync_rounded,
+    AddCardSource.protonDrive => Icons.cloud_outlined,
+  };
+}
+
 class AddCardSheet extends StatefulWidget {
   const AddCardSheet({
     required this.bundle,
     required this.pickCardImage,
     required this.onSave,
+    this.syncthingFolderUri,
+    this.onSyncthingFolderPicked,
+    this.onProtonDriveUsed,
     super.key,
   });
 
   final WalletCardBundle bundle;
   final PickCardImage pickCardImage;
   final ValueChanged<WalletCard> onSave;
+  final String? syncthingFolderUri;
+  final ValueChanged<String>? onSyncthingFolderPicked;
+  final VoidCallback? onProtonDriveUsed;
 
   @override
   State<AddCardSheet> createState() => _AddCardSheetState();
@@ -1809,14 +2359,17 @@ class _AddCardSheetState extends State<AddCardSheet> {
   AddCardSource? _source;
   late CardTemplate _template;
   late Map<String, TextEditingController> _controllers;
-  final List<String> _images = [];
-  String? _selectedImage;
-  String? _mainImage;
+  final List<CardImageRef> _images = [];
+  CardImageRef? _selectedImage;
+  CardImageRef? _mainImage;
+  String? _syncthingFolderUri;
+  String? _sourceError;
   bool _pickingImage = false;
 
   @override
   void initState() {
     super.initState();
+    _syncthingFolderUri = widget.syncthingFolderUri;
     _template = widget.bundle.templates.first;
     _controllers = controllersForTemplate(
       _template,
@@ -1838,7 +2391,10 @@ class _AddCardSheetState extends State<AddCardSheet> {
   }
 
   void _chooseSource(AddCardSource source) {
-    setState(() => _source = source);
+    setState(() {
+      _source = source;
+      _sourceError = null;
+    });
   }
 
   void _changeTemplate(WalletCardType? type) {
@@ -1858,12 +2414,55 @@ class _AddCardSheetState extends State<AddCardSheet> {
   }
 
   Future<void> _addImage() async {
-    if (_images.length >= 4 || _pickingImage) {
+    final source = _source;
+    if (source == null || _images.length >= 4 || _pickingImage) {
       return;
     }
 
-    setState(() => _pickingImage = true);
-    final image = await widget.pickCardImage();
+    setState(() {
+      _pickingImage = true;
+      _sourceError = null;
+    });
+
+    CardImageRef? image;
+    try {
+      if (source == AddCardSource.image) {
+        image = await widget.pickCardImage();
+      } else {
+        final providerAvailable = await ExternalImageBridge.isProviderAvailable(
+          imageProviderForSource(source),
+        );
+        if (!mounted) {
+          return;
+        }
+
+        if (!providerAvailable) {
+          _sourceError = unavailableExternalSourceMessage(source);
+        } else {
+          var folderUri = _syncthingFolderUri;
+          if (source == AddCardSource.syncthing && folderUri == null) {
+            folderUri = await ExternalImageBridge.pickSyncthingFolder();
+            if (!mounted) {
+              return;
+            }
+            _syncthingFolderUri = folderUri;
+            if (folderUri != null) {
+              widget.onSyncthingFolderPicked?.call(folderUri);
+            }
+          }
+
+          if (source != AddCardSource.syncthing || folderUri != null) {
+            image = await pickCardImageFromExternal(
+              source: source,
+              folderUri: folderUri,
+            );
+          }
+        }
+      }
+    } on PlatformException catch (error) {
+      _sourceError = error.message ?? 'Could not open external storage';
+    }
+
     if (!mounted) {
       return;
     }
@@ -1873,13 +2472,16 @@ class _AddCardSheetState extends State<AddCardSheet> {
       if (image == null || _images.length >= 4) {
         return;
       }
+      if (source == AddCardSource.protonDrive) {
+        widget.onProtonDriveUsed?.call();
+      }
       _images.add(image);
       _selectedImage ??= image;
       _mainImage ??= image;
     });
   }
 
-  void _selectImage(String image) {
+  void _selectImage(CardImageRef image) {
     setState(() => _selectedImage = image);
   }
 
@@ -1892,7 +2494,7 @@ class _AddCardSheetState extends State<AddCardSheet> {
     setState(() => _mainImage = image);
   }
 
-  void _deleteImage(String image) {
+  void _deleteImage(CardImageRef image) {
     setState(() {
       _images.remove(image);
       if (_mainImage == image) {
@@ -1947,7 +2549,7 @@ class _AddCardSheetState extends State<AddCardSheet> {
     if (source == null) {
       return false;
     }
-    if (source == AddCardSource.image && _images.isEmpty) {
+    if (_images.isEmpty) {
       return false;
     }
 
@@ -2009,6 +2611,7 @@ class _AddCardSheetState extends State<AddCardSheet> {
                           selectedImage: _selectedImage,
                           mainImage: _mainImage,
                           pickingImage: _pickingImage,
+                          sourceError: _sourceError,
                           onSourceBack: () => setState(() => _source = null),
                           onTypeChanged: _changeTemplate,
                           onAddImage: _addImage,
@@ -2074,7 +2677,7 @@ class AddCardSourcePicker extends StatelessWidget {
           key: const ValueKey('add-card-path-syncthing'),
           icon: Icons.sync_rounded,
           title: 'Syncthing',
-          detail: 'Placeholder connection',
+          detail: 'Choose a synced folder and link images from it',
           onPressed: () => onSelected(AddCardSource.syncthing),
         ),
         const SizedBox(height: 8),
@@ -2082,7 +2685,7 @@ class AddCardSourcePicker extends StatelessWidget {
           key: const ValueKey('add-card-path-proton-drive'),
           icon: Icons.cloud_outlined,
           title: 'Proton Drive',
-          detail: 'Placeholder connection',
+          detail: 'Browse images through the Android file picker',
           onPressed: () => onSelected(AddCardSource.protonDrive),
         ),
       ],
@@ -2164,6 +2767,7 @@ class AddCardDraftForm extends StatelessWidget {
     required this.selectedImage,
     required this.mainImage,
     required this.pickingImage,
+    required this.sourceError,
     required this.onSourceBack,
     required this.onTypeChanged,
     required this.onAddImage,
@@ -2179,16 +2783,17 @@ class AddCardDraftForm extends StatelessWidget {
   final Map<String, TextEditingController> controllers;
   final Map<String, String> fieldErrors;
   final Map<String, String> fieldWarnings;
-  final List<String> images;
-  final String? selectedImage;
-  final String? mainImage;
+  final List<CardImageRef> images;
+  final CardImageRef? selectedImage;
+  final CardImageRef? mainImage;
   final bool pickingImage;
+  final String? sourceError;
   final VoidCallback onSourceBack;
   final ValueChanged<WalletCardType?> onTypeChanged;
   final VoidCallback onAddImage;
-  final ValueChanged<String> onSelectImage;
+  final ValueChanged<CardImageRef> onSelectImage;
   final VoidCallback onSetMainImage;
-  final ValueChanged<String> onDeleteImage;
+  final ValueChanged<CardImageRef> onDeleteImage;
 
   @override
   Widget build(BuildContext context) {
@@ -2221,26 +2826,31 @@ class AddCardDraftForm extends StatelessWidget {
             ),
           ],
         ),
-        if (source == AddCardSource.image) ...[
-          const SizedBox(height: 12),
-          DraftImageActionRow(
-            images: images,
-            pickingImage: pickingImage,
-            onAddImage: onAddImage,
+        const SizedBox(height: 12),
+        if (source != AddCardSource.image) ExternalStorageHint(source: source),
+        if (source != AddCardSource.image) const SizedBox(height: 12),
+        DraftImageActionRow(
+          source: source,
+          images: images,
+          pickingImage: pickingImage,
+          onAddImage: onAddImage,
+        ),
+        if (sourceError != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            sourceError!,
+            style: WalletStyles.captionRegular(color: AkatorColors.danger),
           ),
         ],
         const SizedBox(height: 14),
-        if (source == AddCardSource.image)
-          DraftImageEditor(
-            images: images,
-            selectedImage: selectedImage,
-            mainImage: mainImage,
-            onSelectImage: onSelectImage,
-            onSetMainImage: onSetMainImage,
-            onDeleteImage: onDeleteImage,
-          )
-        else
-          ExternalStoragePlaceholder(source: source),
+        DraftImageEditor(
+          images: images,
+          selectedImage: selectedImage,
+          mainImage: mainImage,
+          onSelectImage: onSelectImage,
+          onSetMainImage: onSetMainImage,
+          onDeleteImage: onDeleteImage,
+        ),
         const SizedBox(height: 16),
         for (final field in template.fields) ...[
           SensitiveFieldText(
@@ -2258,13 +2868,15 @@ class AddCardDraftForm extends StatelessWidget {
 
 class DraftImageActionRow extends StatelessWidget {
   const DraftImageActionRow({
+    required this.source,
     required this.images,
     required this.pickingImage,
     required this.onAddImage,
     super.key,
   });
 
-  final List<String> images;
+  final AddCardSource source;
+  final List<CardImageRef> images;
   final bool pickingImage;
   final VoidCallback onAddImage;
 
@@ -2280,8 +2892,8 @@ class DraftImageActionRow extends StatelessWidget {
             ),
           ),
           onPressed: images.length < 4 && !pickingImage ? onAddImage : null,
-          icon: const Icon(Icons.photo_camera_rounded),
-          label: Text(pickingImage ? 'Opening camera' : 'Add image'),
+          icon: Icon(iconForAddSource(source)),
+          label: Text(pickingImage ? 'Opening picker' : 'Add image'),
         ),
         const Spacer(),
         ImageCountBadge(count: images.length),
@@ -2340,12 +2952,12 @@ class DraftImageEditor extends StatefulWidget {
     super.key,
   });
 
-  final List<String> images;
-  final String? selectedImage;
-  final String? mainImage;
-  final ValueChanged<String> onSelectImage;
+  final List<CardImageRef> images;
+  final CardImageRef? selectedImage;
+  final CardImageRef? mainImage;
+  final ValueChanged<CardImageRef> onSelectImage;
   final VoidCallback onSetMainImage;
-  final ValueChanged<String> onDeleteImage;
+  final ValueChanged<CardImageRef> onDeleteImage;
 
   @override
   State<DraftImageEditor> createState() => _DraftImageEditorState();
@@ -2513,10 +3125,10 @@ class DraftImageThumbnailRow extends StatelessWidget {
     super.key,
   });
 
-  final List<String> images;
-  final String? selectedImage;
-  final ValueChanged<String> onSelectImage;
-  final ValueChanged<String> onDeleteImage;
+  final List<CardImageRef> images;
+  final CardImageRef? selectedImage;
+  final ValueChanged<CardImageRef> onSelectImage;
+  final ValueChanged<CardImageRef> onDeleteImage;
 
   @override
   Widget build(BuildContext context) {
@@ -2565,13 +3177,18 @@ class DraftImageThumbnailRow extends StatelessWidget {
   }
 }
 
-class ExternalStoragePlaceholder extends StatelessWidget {
-  const ExternalStoragePlaceholder({required this.source, super.key});
+class ExternalStorageHint extends StatelessWidget {
+  const ExternalStorageHint({required this.source, super.key});
 
   final AddCardSource source;
 
   @override
   Widget build(BuildContext context) {
+    final text =
+        source == AddCardSource.syncthing
+            ? 'Choose your Syncthing folder once, then pick images from Android storage.'
+            : 'Pick images through Android storage. Proton Drive appears here when its app is installed and signed in.';
+
     return DecoratedBox(
       decoration: BoxDecoration(
         color: AkatorColors.backgroundNorm,
@@ -2582,16 +3199,11 @@ class ExternalStoragePlaceholder extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         child: Row(
           children: [
-            Icon(
-              source == AddCardSource.syncthing
-                  ? Icons.sync_rounded
-                  : Icons.cloud_outlined,
-              color: AkatorColors.primaryStrong,
-            ),
+            Icon(iconForAddSource(source), color: AkatorColors.primaryStrong),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                '${addCardSourceLabel(source)} connection placeholder',
+                text,
                 style: WalletStyles.body2Medium(color: AkatorColors.textWeak),
               ),
             ),
@@ -2659,7 +3271,10 @@ String titleForDraftCard(CardTemplate template, Map<String, String> fields) {
   return 'New ${template.label}';
 }
 
-String fallbackImageForType(WalletCardBundle bundle, WalletCardType type) {
+CardImageRef fallbackImageForType(
+  WalletCardBundle bundle,
+  WalletCardType type,
+) {
   for (final card in bundle.cards) {
     if (card.type == type) {
       return card.primaryImage;
@@ -3444,9 +4059,20 @@ class ExploreSection extends StatelessWidget {
 }
 
 class WalletMenuDrawer extends StatelessWidget {
-  const WalletMenuDrawer({required this.onClose, super.key});
+  const WalletMenuDrawer({
+    required this.connections,
+    required this.syncthingAvailable,
+    required this.protonDriveAvailable,
+    required this.onClose,
+    required this.onConnectionsPressed,
+    super.key,
+  });
 
+  final WalletConnections connections;
+  final bool syncthingAvailable;
+  final bool protonDriveAvailable;
   final VoidCallback onClose;
+  final VoidCallback onConnectionsPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -3461,23 +4087,55 @@ class WalletMenuDrawer extends StatelessWidget {
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 28),
-                children: const [
-                  DrawerDivider(),
-                  DrawerSectionTitle('Connections'),
-                  SizedBox(height: 14),
-                  DrawerPlainItem('Syncthing'),
-                  DrawerPlainItem('Proton Drive'),
-                  SizedBox(height: 28),
-                  DrawerDivider(),
-                  DrawerSectionTitle('More'),
-                  SizedBox(height: 14),
-                  DrawerPlainItem('Discover: why is my data safe?'),
-                  DrawerPlainItem('User Settings'),
-                  DrawerPlainItem('Security'),
-                  DrawerPlainItem('Recovery'),
-                  SizedBox(height: 28),
-                  DrawerDivider(),
-                  DrawerPlainItem('Logout', large: true),
+                children: [
+                  const DrawerDivider(),
+                  const DrawerSectionTitle('Connections'),
+                  const SizedBox(height: 14),
+                  DrawerConnectionItem(
+                    key: const ValueKey('drawer-connection-syncthing'),
+                    title: 'Syncthing',
+                    state: connectionStateFor(
+                      available: syncthingAvailable,
+                      connected: connections.syncthingConnected,
+                    ),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      unawaited(
+                        Future<void>.delayed(
+                          const Duration(milliseconds: 220),
+                          onConnectionsPressed,
+                        ),
+                      );
+                    },
+                  ),
+                  DrawerConnectionItem(
+                    key: const ValueKey('drawer-connection-proton-drive'),
+                    title: 'Proton Drive',
+                    state: connectionStateFor(
+                      available: protonDriveAvailable,
+                      connected: connections.protonDriveConnected,
+                    ),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      unawaited(
+                        Future<void>.delayed(
+                          const Duration(milliseconds: 220),
+                          onConnectionsPressed,
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 28),
+                  const DrawerDivider(),
+                  const DrawerSectionTitle('More'),
+                  const SizedBox(height: 14),
+                  const DrawerPlainItem('Discover: why is my data safe?'),
+                  const DrawerPlainItem('User Settings'),
+                  const DrawerPlainItem('Security'),
+                  const DrawerPlainItem('Recovery'),
+                  const SizedBox(height: 28),
+                  const DrawerDivider(),
+                  const DrawerPlainItem('Logout', large: true),
                 ],
               ),
             ),
@@ -3489,9 +4147,20 @@ class WalletMenuDrawer extends StatelessWidget {
 }
 
 class WalletSettingsDrawer extends StatelessWidget {
-  const WalletSettingsDrawer({required this.onClose, super.key});
+  const WalletSettingsDrawer({
+    required this.connections,
+    required this.syncthingAvailable,
+    required this.protonDriveAvailable,
+    required this.onClose,
+    required this.onConnectionsPressed,
+    super.key,
+  });
 
+  final WalletConnections connections;
+  final bool syncthingAvailable;
+  final bool protonDriveAvailable;
   final VoidCallback onClose;
+  final VoidCallback onConnectionsPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -3523,17 +4192,627 @@ class WalletSettingsDrawer extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 18),
-            const SettingsPanel(
+            SettingsPanel(
               title: 'Connection status',
               children: [
-                SettingsTextTile(
+                SettingsConnectionTile(
+                  key: const ValueKey('settings-connection-syncthing'),
                   title: 'Syncthing',
-                  lines: ['Proton Drive'],
-                  showChevron: false,
+                  state: connectionStateFor(
+                    available: syncthingAvailable,
+                    connected: connections.syncthingConnected,
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    unawaited(
+                      Future<void>.delayed(
+                        const Duration(milliseconds: 220),
+                        onConnectionsPressed,
+                      ),
+                    );
+                  },
+                ),
+                SettingsConnectionTile(
+                  key: const ValueKey('settings-connection-proton-drive'),
+                  title: 'Proton Drive',
+                  state: connectionStateFor(
+                    available: protonDriveAvailable,
+                    connected: connections.protonDriveConnected,
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    unawaited(
+                      Future<void>.delayed(
+                        const Duration(milliseconds: 220),
+                        onConnectionsPressed,
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class ConnectionSnapshot {
+  const ConnectionSnapshot({
+    required this.connections,
+    required this.syncthingAvailable,
+    required this.protonDriveAvailable,
+  });
+
+  final WalletConnections connections;
+  final bool syncthingAvailable;
+  final bool protonDriveAvailable;
+}
+
+class ConnectionActionResult {
+  const ConnectionActionResult({required this.snapshot, this.message});
+
+  final ConnectionSnapshot snapshot;
+  final String? message;
+}
+
+class WalletConnectionView {
+  const WalletConnectionView({
+    required this.label,
+    required this.detail,
+    required this.color,
+    required this.connected,
+  });
+
+  final String label;
+  final String detail;
+  final Color color;
+  final bool connected;
+}
+
+WalletConnectionView connectionStateFor({
+  required bool available,
+  required bool connected,
+}) {
+  if (!available) {
+    return const WalletConnectionView(
+      label: 'Not installed',
+      detail: 'Set up connection',
+      color: AkatorColors.danger,
+      connected: false,
+    );
+  }
+  if (!connected) {
+    return const WalletConnectionView(
+      label: 'Disconnected',
+      detail: 'Set up connection',
+      color: AkatorColors.textHint,
+      connected: false,
+    );
+  }
+  return const WalletConnectionView(
+    label: 'Connected',
+    detail: 'Show files or adjust settings',
+    color: AkatorColors.success,
+    connected: true,
+  );
+}
+
+enum ConnectionSettingsTarget { syncthing, protonDrive }
+
+class ConnectionsSheet extends StatefulWidget {
+  const ConnectionsSheet({
+    required this.initialSnapshot,
+    required this.onSetupSyncthing,
+    required this.onSetupProtonDrive,
+    required this.onShowSyncthingFiles,
+    required this.onShowProtonDriveFiles,
+    required this.onOpenSyncthingApp,
+    required this.onOpenProtonDriveApp,
+    required this.onDeleteSyncthing,
+    required this.onDeleteProtonDrive,
+    super.key,
+  });
+
+  final ConnectionSnapshot initialSnapshot;
+  final Future<ConnectionActionResult> Function() onSetupSyncthing;
+  final Future<ConnectionActionResult> Function() onSetupProtonDrive;
+  final Future<ConnectionActionResult> Function() onShowSyncthingFiles;
+  final Future<ConnectionActionResult> Function() onShowProtonDriveFiles;
+  final Future<ConnectionActionResult> Function() onOpenSyncthingApp;
+  final Future<ConnectionActionResult> Function() onOpenProtonDriveApp;
+  final Future<ConnectionActionResult> Function() onDeleteSyncthing;
+  final Future<ConnectionActionResult> Function() onDeleteProtonDrive;
+
+  @override
+  State<ConnectionsSheet> createState() => _ConnectionsSheetState();
+}
+
+class _ConnectionsSheetState extends State<ConnectionsSheet> {
+  late ConnectionSnapshot _snapshot = widget.initialSnapshot;
+  bool _busy = false;
+  String? _message;
+  ConnectionSettingsTarget? _settingsTarget;
+
+  Future<void> _run(Future<ConnectionActionResult> Function() action) async {
+    if (_busy) {
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+
+    final result = await action();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _snapshot = result.snapshot;
+      _message = result.message;
+      _busy = false;
+    });
+
+    final message = result.message;
+    if (message != null) {
+      unawaited(
+        Future<void>.delayed(const Duration(seconds: 3), () {
+          if (mounted && _message == message) {
+            setState(() => _message = null);
+          }
+        }),
+      );
+    }
+  }
+
+  void _openSettings(ConnectionSettingsTarget target) {
+    setState(() {
+      _settingsTarget = target;
+      _message = null;
+    });
+  }
+
+  void _closeSettings() {
+    setState(() {
+      _settingsTarget = null;
+      _message = null;
+    });
+  }
+
+  WalletConnectionView _stateFor(ConnectionSettingsTarget target) {
+    return switch (target) {
+      ConnectionSettingsTarget.syncthing => connectionStateFor(
+        available: _snapshot.syncthingAvailable,
+        connected: _snapshot.connections.syncthingConnected,
+      ),
+      ConnectionSettingsTarget.protonDrive => connectionStateFor(
+        available: _snapshot.protonDriveAvailable,
+        connected: _snapshot.connections.protonDriveConnected,
+      ),
+    };
+  }
+
+  Future<ConnectionActionResult> Function() _setupAction(
+    ConnectionSettingsTarget target,
+  ) {
+    return switch (target) {
+      ConnectionSettingsTarget.syncthing => widget.onSetupSyncthing,
+      ConnectionSettingsTarget.protonDrive => widget.onSetupProtonDrive,
+    };
+  }
+
+  Future<ConnectionActionResult> Function() _showFilesAction(
+    ConnectionSettingsTarget target,
+  ) {
+    return switch (target) {
+      ConnectionSettingsTarget.syncthing => widget.onShowSyncthingFiles,
+      ConnectionSettingsTarget.protonDrive => widget.onShowProtonDriveFiles,
+    };
+  }
+
+  Future<ConnectionActionResult> Function() _openProviderAppAction(
+    ConnectionSettingsTarget target,
+  ) {
+    return switch (target) {
+      ConnectionSettingsTarget.syncthing => widget.onOpenSyncthingApp,
+      ConnectionSettingsTarget.protonDrive => widget.onOpenProtonDriveApp,
+    };
+  }
+
+  Future<ConnectionActionResult> Function() _deleteAction(
+    ConnectionSettingsTarget target,
+  ) {
+    return switch (target) {
+      ConnectionSettingsTarget.syncthing => widget.onDeleteSyncthing,
+      ConnectionSettingsTarget.protonDrive => widget.onDeleteProtonDrive,
+    };
+  }
+
+  Future<void> _confirmDisconnect(
+    ConnectionSettingsTarget target,
+    String providerName,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Text('Disconnect $providerName'),
+            content: Text(
+              'Remove Akator\'s saved $providerName connection. '
+              'Wallet cards and provider files stay where they are.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AkatorColors.danger,
+                  foregroundColor: AkatorColors.textInverted,
+                ),
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Disconnect'),
+              ),
+            ],
+          ),
+    );
+
+    if (confirmed == true) {
+      await _run(_deleteAction(target));
+    }
+  }
+
+  Widget _buildSettingsView(
+    BuildContext context,
+    ConnectionSettingsTarget target,
+  ) {
+    final state = _stateFor(target);
+    final isSyncthing = target == ConnectionSettingsTarget.syncthing;
+    final title = isSyncthing ? 'Syncthing settings' : 'Proton Drive settings';
+    final providerName = isSyncthing ? 'Syncthing' : 'Proton Drive';
+    final providerText =
+        isSyncthing
+            ? 'Akator stores the selected Android folder permission. '
+                'Device pairing, folder sync rules, versioning and network '
+                'state stay in Syncthing-Fork.'
+            : 'Akator stores only whether Proton Drive is enabled here. '
+                'Sign-in, cloud folders, offline files and account settings '
+                'stay in Proton Drive.';
+
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.76,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  tooltip: 'Back to connections',
+                  onPressed: _closeSettings,
+                  icon: const Icon(Icons.chevron_left_rounded),
+                ),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: WalletStyles.subheadline(
+                      color: AkatorColors.textNorm,
+                    ),
+                  ),
+                ),
+                ConnectionStatusBadge(state: state),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: 'Close connections',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              providerText,
+              style: WalletStyles.captionRegular(color: AkatorColors.textWeak),
+            ),
+            const SizedBox(height: 18),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (state.connected) ...[
+                          FilledButton.tonal(
+                            onPressed:
+                                _busy
+                                    ? null
+                                    : () => _run(_showFilesAction(target)),
+                            child: const Text('Show files'),
+                          ),
+                          FilledButton.tonal(
+                            onPressed:
+                                _busy
+                                    ? null
+                                    : () =>
+                                        _run(_openProviderAppAction(target)),
+                            child: Text('Open $providerName'),
+                          ),
+                          if (isSyncthing)
+                            OutlinedButton(
+                              onPressed:
+                                  _busy
+                                      ? null
+                                      : () => _run(_setupAction(target)),
+                              child: const Text('Change folder'),
+                            ),
+                          OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AkatorColors.danger,
+                              side: const BorderSide(
+                                color: AkatorColors.danger,
+                              ),
+                            ),
+                            onPressed:
+                                _busy
+                                    ? null
+                                    : () => _confirmDisconnect(
+                                      target,
+                                      providerName,
+                                    ),
+                            child: const Text('Disconnect'),
+                          ),
+                        ] else
+                          FilledButton.tonal(
+                            onPressed:
+                                _busy ? null : () => _run(_setupAction(target)),
+                            child: const Text('Set up connection'),
+                          ),
+                      ],
+                    ),
+                    if (_message != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _message!,
+                        style: WalletStyles.captionRegular(
+                          color: AkatorColors.primaryStrong,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settingsTarget = _settingsTarget;
+    if (settingsTarget != null) {
+      return _buildSettingsView(context, settingsTarget);
+    }
+
+    final syncthingState = connectionStateFor(
+      available: _snapshot.syncthingAvailable,
+      connected: _snapshot.connections.syncthingConnected,
+    );
+    final protonDriveState = connectionStateFor(
+      available: _snapshot.protonDriveAvailable,
+      connected: _snapshot.connections.protonDriveConnected,
+    );
+
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.76,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Connections',
+                    style: WalletStyles.subheadline(
+                      color: AkatorColors.textNorm,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close connections',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Akator stores provider status and folder permission only.',
+              style: WalletStyles.captionRegular(color: AkatorColors.textWeak),
+            ),
+            const SizedBox(height: 14),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ConnectionSetupTile(
+                      title: 'Syncthing',
+                      detail:
+                          'Choose a synced Android folder. No login is stored.',
+                      icon: Icons.sync_rounded,
+                      state: syncthingState,
+                      busy: _busy,
+                      onSetup: () => _run(widget.onSetupSyncthing),
+                      onShowFiles: () => _run(widget.onShowSyncthingFiles),
+                      onSettings:
+                          () =>
+                              _openSettings(ConnectionSettingsTarget.syncthing),
+                    ),
+                    const SizedBox(height: 10),
+                    ConnectionSetupTile(
+                      title: 'Proton Drive',
+                      detail:
+                          'Use the Proton Drive app. Credentials stay there.',
+                      icon: Icons.cloud_outlined,
+                      state: protonDriveState,
+                      busy: _busy,
+                      onSetup: () => _run(widget.onSetupProtonDrive),
+                      onShowFiles: () => _run(widget.onShowProtonDriveFiles),
+                      onSettings:
+                          () => _openSettings(
+                            ConnectionSettingsTarget.protonDrive,
+                          ),
+                    ),
+                    if (_message != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _message!,
+                        style: WalletStyles.captionRegular(
+                          color: AkatorColors.primaryStrong,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ConnectionSetupTile extends StatelessWidget {
+  const ConnectionSetupTile({
+    required this.title,
+    required this.detail,
+    required this.icon,
+    required this.state,
+    required this.busy,
+    required this.onSetup,
+    required this.onShowFiles,
+    required this.onSettings,
+    super.key,
+  });
+
+  final String title;
+  final String detail;
+  final IconData icon;
+  final WalletConnectionView state;
+  final bool busy;
+  final VoidCallback onSetup;
+  final VoidCallback onShowFiles;
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AkatorColors.backgroundNorm,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: state.connected && !busy ? onShowFiles : null,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AkatorColors.appBarDividerColor),
+          ),
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, color: AkatorColors.primaryStrong),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: WalletStyles.body1Medium(
+                        color: AkatorColors.textNorm,
+                      ),
+                    ),
+                  ),
+                  ConnectionStatusBadge(state: state),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                detail,
+                style: WalletStyles.captionRegular(
+                  color: AkatorColors.textWeak,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (state.connected) ...[
+                    FilledButton.tonal(
+                      onPressed: busy ? null : onShowFiles,
+                      child: const Text('Show files'),
+                    ),
+                    OutlinedButton(
+                      onPressed: busy ? null : onSettings,
+                      child: const Text('Settings'),
+                    ),
+                  ] else
+                    FilledButton.tonal(
+                      onPressed: busy ? null : onSetup,
+                      child: const Text('Set up connection'),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ConnectionStatusBadge extends StatelessWidget {
+  const ConnectionStatusBadge({
+    required this.state,
+    this.onDark = false,
+    super.key,
+  });
+
+  final WalletConnectionView state;
+  final bool onDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final color =
+        onDark && state.color == AkatorColors.textHint
+            ? AkatorColors.textNeutralOnDark
+            : state.color;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: onDark ? 0.14 : 0.1),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        child: Text(
+          state.label,
+          style: WalletStyles.captionRegular(color: color),
         ),
       ),
     );
@@ -3849,6 +5128,40 @@ class DrawerPlainItem extends StatelessWidget {
   }
 }
 
+class DrawerConnectionItem extends StatelessWidget {
+  const DrawerConnectionItem({
+    required this.title,
+    required this.state,
+    required this.onPressed,
+    super.key,
+  });
+
+  final String title;
+  final WalletConnectionView state;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              Expanded(child: Text(title, style: WalletStyles.drawerBody())),
+              const SizedBox(width: 8),
+              ConnectionStatusBadge(state: state, onDark: true),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class DrawerDivider extends StatelessWidget {
   const DrawerDivider({super.key});
 
@@ -3946,6 +5259,39 @@ class SettingsTextTile extends StatelessWidget {
   }
 }
 
+class SettingsConnectionTile extends StatelessWidget {
+  const SettingsConnectionTile({
+    required this.title,
+    required this.state,
+    required this.onPressed,
+    super.key,
+  });
+
+  final String title;
+  final WalletConnectionView state;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      onTap: onPressed,
+      title: Text(
+        title,
+        style: WalletStyles.body1Medium(color: AkatorColors.textNorm),
+      ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(
+          state.detail,
+          style: WalletStyles.captionRegular(color: AkatorColors.textWeak),
+        ),
+      ),
+      trailing: ConnectionStatusBadge(state: state),
+    );
+  }
+}
+
 class CircleIconButton extends StatelessWidget {
   const CircleIconButton({
     required this.tooltip,
@@ -3989,6 +5335,7 @@ class AkatorColors {
   static const textHint = Color(0xFF6B7280);
   static const textWeak = Color(0xFF4B5563);
   static const textInverted = Color(0xFFFFFFFF);
+  static const textNeutralOnDark = Color(0xFFD1D5DB);
   static const appBarDividerColor = Color(0xFFE5E7EB);
   static const primary = Color(0xFF3370E4);
   static const primaryStrong = Color(0xFF2563EB);

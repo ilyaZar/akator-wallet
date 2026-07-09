@@ -9,14 +9,14 @@ void main() {
     tester,
   ) async {
     final draftImages = [
-      'assets/cards/credit_card.png',
-      'assets/cards/credit_card_2.png',
-      'assets/cards/credit_card_3.png',
-      'assets/cards/credit_card_4.png',
+      CardImageRef.asset('assets/cards/credit_card.png'),
+      CardImageRef.asset('assets/cards/credit_card_2.png'),
+      CardImageRef.asset('assets/cards/credit_card_3.png'),
+      CardImageRef.asset('assets/cards/credit_card_4.png'),
     ];
     var nextImage = 0;
 
-    final bundle = await const WalletCardStore().load();
+    final bundle = await const WalletCardStore(loadSavedCards: false).load();
     await tester.pumpWidget(
       AddCardFlowHarness(
         initialBundle: bundle,
@@ -44,7 +44,17 @@ void main() {
       find.byKey(const ValueKey('add-card-type-selector')),
       findsOneWidget,
     );
-    expect(find.text('Proton Drive connection placeholder'), findsOneWidget);
+    expect(find.textContaining('Proton Drive appears here'), findsOneWidget);
+    await tapVisibleBounded(
+      tester,
+      find.byKey(const ValueKey('add-draft-image')),
+    );
+    expect(
+      find.textContaining('Proton Drive is not installed'),
+      findsOneWidget,
+    );
+    expect(find.text('Images (0/4)'), findsOneWidget);
+    expect(find.byType(CardImageThumbnail), findsNothing);
 
     await tapVisibleBounded(tester, find.byTooltip('Choose source'));
     await tapVisibleBounded(
@@ -141,7 +151,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
     expect(find.byType(AddCardSheet), findsNothing);
     expect(find.text('Ada Student'), findsOneWidget);
-    expect(overviewCardIds(tester), hasLength(7));
+    expect(overviewCardIds(tester), hasLength(10));
 
     await tapVisibleBounded(
       tester,
