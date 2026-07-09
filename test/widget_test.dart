@@ -6,7 +6,9 @@ import 'package:akator_wallet/wallet_card_store.dart';
 
 void main() {
   testWidgets('opens the draft menu and settings drawers', (tester) async {
-    await tester.pumpWidget(const AkatorWalletApp());
+    await tester.pumpWidget(
+      const AkatorWalletApp(cardStore: WalletCardStore(loadSavedCards: false)),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Akator Wallet'), findsWidgets);
@@ -27,6 +29,43 @@ void main() {
     );
     expect(find.byType(PageView), findsOneWidget);
     expect(find.text('Explore: Security & Data'), findsOneWidget);
+    await tester.tap(find.byTooltip('Open wallet menu'));
+    await tester.pumpAndSettle();
+    expect(find.text('Connections'), findsOneWidget);
+    expect(find.text('Syncthing'), findsOneWidget);
+    expect(find.text('Proton Drive'), findsOneWidget);
+    expect(find.text('Not installed'), findsWidgets);
+
+    await tester.tap(find.byKey(const ValueKey('drawer-connection-syncthing')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ConnectionsSheet), findsOneWidget);
+    expect(
+      find.text('Akator stores provider status and folder permission only.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Use the Proton Drive app. Credentials stay there.'),
+      findsOneWidget,
+    );
+    expect(find.text('Set up connection'), findsWidgets);
+    expect(find.textContaining('password', findRichText: true), findsNothing);
+    await tester.tap(find.byTooltip('Close connections'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Open settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Connection status'), findsOneWidget);
+    expect(find.text('Set up connection'), findsWidgets);
+    await tapVisible(
+      tester,
+      find.byKey(const ValueKey('settings-connection-proton-drive')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(ConnectionsSheet), findsOneWidget);
+    expect(find.text('Delete connection'), findsNothing);
+    await tester.tap(find.byTooltip('Close connections'));
+    await tester.pumpAndSettle();
+
     expect(find.byIcon(Icons.refresh_rounded), findsNothing);
     expect(find.byTooltip('Cycle favorite card'), findsNothing);
     expectOverviewFilterMapping();
@@ -53,8 +92,11 @@ void main() {
       'demo-health-insurance',
       'demo-loyalty-card',
       'demo-driving-license',
+      'demo-dc-library-card',
+      'demo-customer-loyalty-cards',
+      'demo-delta-skymiles-card',
     ]);
-    expect(find.byType(OverviewCardTile), findsNWidgets(6));
+    expect(find.byType(OverviewCardTile), findsNWidgets(9));
     expect(find.byKey(const ValueKey('overview-card-scroll')), findsOneWidget);
     expect(find.byKey(const ValueKey('overview-add-card')), findsOneWidget);
     expect(
@@ -132,6 +174,9 @@ void main() {
       'demo-health-insurance',
       'demo-loyalty-card',
       'demo-driving-license',
+      'demo-dc-library-card',
+      'demo-customer-loyalty-cards',
+      'demo-delta-skymiles-card',
     ]);
 
     await tapVisible(
@@ -193,7 +238,7 @@ void main() {
     expect(
       tester
           .widgetList<CardImageThumbnail>(find.byType(CardImageThumbnail))
-          .map((thumbnail) => thumbnail.image),
+          .map((thumbnail) => thumbnail.image.uri),
       [
         'assets/cards/credit_card.png',
         'assets/cards/credit_card_2.png',
@@ -283,7 +328,7 @@ void main() {
     expect(
       tester
           .widgetList<CardImageThumbnail>(find.byType(CardImageThumbnail))
-          .map((thumbnail) => thumbnail.image),
+          .map((thumbnail) => thumbnail.image.uri),
       [
         'assets/cards/credit_card_2.png',
         'assets/cards/credit_card.png',
@@ -456,6 +501,9 @@ void main() {
       'demo-health-insurance',
       'demo-loyalty-card',
       'demo-driving-license',
+      'demo-dc-library-card',
+      'demo-customer-loyalty-cards',
+      'demo-delta-skymiles-card',
     ]);
 
     await tapVisible(
@@ -483,6 +531,9 @@ void main() {
       'demo-personal-id',
       'demo-loyalty-card',
       'demo-driving-license',
+      'demo-dc-library-card',
+      'demo-customer-loyalty-cards',
+      'demo-delta-skymiles-card',
     ]);
     expect(
       find.byKey(const ValueKey('overview-filter-health_insurance')),
