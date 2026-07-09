@@ -25,7 +25,7 @@ void main() {
     );
     expect(
       find.byKey(const ValueKey('view-card-summary-demo-credit-card')),
-      findsOneWidget,
+      findsNothing,
     );
     expect(find.byType(PageView), findsOneWidget);
     expect(find.text('Explore: Security & Data'), findsOneWidget);
@@ -464,7 +464,7 @@ void main() {
     expect(find.text('John Doe'), findsNothing);
 
     await tester.tap(
-      find.byKey(const ValueKey('view-card-summary-demo-credit-card')),
+      find.byKey(const ValueKey('view-card-image-demo-credit-card')),
     );
     await tester.pumpAndSettle();
     expect(find.text('Card number'), findsOneWidget);
