@@ -1025,9 +1025,6 @@ class FavoriteCardCarousel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final selectedCard = bundle.cards[selectedIndex];
-    final selectedTemplate = bundle.templateFor(selectedCard.type);
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1059,12 +1056,6 @@ class FavoriteCardCarousel extends StatelessWidget {
             count: bundle.cards.length,
             selectedIndex: selectedIndex,
           ),
-        ),
-        const SizedBox(height: 14),
-        SelectedCardSummary(
-          card: selectedCard,
-          template: selectedTemplate,
-          onView: () => onView(selectedCard, selectedTemplate),
         ),
       ],
     );
@@ -1943,59 +1934,6 @@ class HoldToRevealButton extends StatelessWidget {
             width: 48,
             height: 48,
             child: Icon(Icons.info_outline_rounded),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class SelectedCardSummary extends StatelessWidget {
-  const SelectedCardSummary({
-    required this.card,
-    required this.template,
-    required this.onView,
-    super.key,
-  });
-
-  final WalletCard card;
-  final CardTemplate template;
-  final VoidCallback onView;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: 'View ${card.title}',
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          key: ValueKey('view-card-summary-${card.id}'),
-          borderRadius: BorderRadius.circular(8),
-          onTap: onView,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: AkatorColors.backgroundNorm,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AkatorColors.appBarDividerColor),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      card.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: WalletStyles.body1Medium(
-                        color: AkatorColors.textNorm,
-                      ),
-                    ),
-                  ),
-                  CardTypeBadge(label: template.label),
-                ],
-              ),
-            ),
           ),
         ),
       ),
