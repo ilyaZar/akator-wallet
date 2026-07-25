@@ -26,7 +26,8 @@ enum WalletCardType {
 enum CardImageKind {
   asset('asset'),
   localFile('local_file'),
-  externalUri('external_uri');
+  externalUri('external_uri'),
+  remote('remote');
 
   const CardImageKind(this.storageKey);
 
@@ -109,6 +110,25 @@ class CardImageRef {
       provider: provider,
       displayName: displayName ?? displayNameForUri(uri),
       mimeType: mimeType ?? 'image/*',
+    );
+  }
+
+  factory CardImageRef.remote({
+    required String path,
+    required CardImageProvider provider,
+    required String displayName,
+    required String mimeType,
+  }) {
+    if (provider == CardImageProvider.internal) {
+      throw ArgumentError.value(provider, 'provider', 'must be remote');
+    }
+    return CardImageRef(
+      id: imageIdForUri('${provider.storageKey}:$path'),
+      uri: path,
+      kind: CardImageKind.remote,
+      provider: provider,
+      displayName: displayName,
+      mimeType: mimeType,
     );
   }
 
@@ -326,41 +346,51 @@ class WalletCardBundle {
 
 class WalletConnections {
   const WalletConnections({
-    this.syncthingFolderUri,
-    this.protonDriveConnected = false,
+    this.companionBaseUrl,
+    this.companionAccessToken,
+    this.legacySyncthingFolderUri,
   });
 
-  final String? syncthingFolderUri;
-  final bool protonDriveConnected;
+  final String? companionBaseUrl;
+  final String? companionAccessToken;
+  final String? legacySyncthingFolderUri;
 
-  bool get syncthingConnected =>
-      syncthingFolderUri != null && syncthingFolderUri!.isNotEmpty;
+  bool get companionConfigured =>
+      companionBaseUrl != null &&
+      companionBaseUrl!.isNotEmpty &&
+      companionAccessToken != null &&
+      companionAccessToken!.isNotEmpty;
 
   factory WalletConnections.fromJson(Map<String, dynamic> json) {
     return WalletConnections(
-      syncthingFolderUri: json['syncthing_folder_uri'] as String?,
-      protonDriveConnected: json['proton_drive_connected'] as bool? ?? false,
+      companionBaseUrl: json['companion_base_url'] as String?,
+      companionAccessToken: json['companion_access_token'] as String?,
+      legacySyncthingFolderUri: json['syncthing_folder_uri'] as String?,
     );
   }
 
   WalletConnections copyWith({
-    String? syncthingFolderUri,
-    bool clearSyncthingFolderUri = false,
-    bool? protonDriveConnected,
+    String? companionBaseUrl,
+    String? companionAccessToken,
+    bool clearCompanion = false,
   }) {
     return WalletConnections(
-      syncthingFolderUri:
-          clearSyncthingFolderUri
+      companionBaseUrl:
+          clearCompanion ? null : companionBaseUrl ?? this.companionBaseUrl,
+      companionAccessToken:
+          clearCompanion
               ? null
-              : syncthingFolderUri ?? this.syncthingFolderUri,
-      protonDriveConnected: protonDriveConnected ?? this.protonDriveConnected,
+              : companionAccessToken ?? this.companionAccessToken,
+      legacySyncthingFolderUri: legacySyncthingFolderUri,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'syncthing_folder_uri': syncthingFolderUri,
-      'proton_drive_connected': protonDriveConnected,
+      'companion_base_url': companionBaseUrl,
+      'companion_access_token': companionAccessToken,
+      if (legacySyncthingFolderUri != null)
+        'syncthing_folder_uri': legacySyncthingFolderUri,
     };
   }
 }

@@ -1,0 +1,35 @@
+[Unit]
+Description=Akator wallet storage companion
+After=network-online.target syncthing.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/akator-wallet/companion.env
+ExecStart=%h/.local/bin/akator-storage-companion \
+    --listen ${AKATOR_COMPANION_LISTEN} \
+    --token-file ${AKATOR_COMPANION_TOKEN_FILE} \
+    --syncthing-root ${AKATOR_SYNCTHING_ROOT} \
+    --proton-root ${AKATOR_PROTON_ROOT} \
+    --proton-cli ${AKATOR_PROTON_CLI}
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectHome=read-only
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+ReadWritePaths=%h/Work/akator-wallet-storage/syncthing
+ReadWritePaths=%h/.cache/proton-drive-cli
+ReadWritePaths=%h/.local/share/proton-drive-cli
+ReadWritePaths=%h/.local/state/proton-drive-cli
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -44,13 +44,13 @@ void main() {
       find.byKey(const ValueKey('add-card-type-selector')),
       findsOneWidget,
     );
-    expect(find.textContaining('Proton Drive appears here'), findsOneWidget);
+    expect(find.textContaining('authenticated host companion'), findsOneWidget);
     await tapVisibleBounded(
       tester,
       find.byKey(const ValueKey('add-draft-image')),
     );
     expect(
-      find.textContaining('Proton Drive is not installed'),
+      find.textContaining('Connect Akator to the host storage companion'),
       findsOneWidget,
     );
     expect(find.text('Images (0/4)'), findsOneWidget);

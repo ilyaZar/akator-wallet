@@ -1,3 +1,4 @@
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:akator_wallet/main.dart';
@@ -60,54 +61,77 @@ void main() {
     expect(restored.images, [external, first]);
   });
 
-  test('wallet connections store provider state without credentials', () {
+  test('remote image refs store provider paths without connection secrets', () {
+    final image = CardImageRef.remote(
+      path: 'cards/front.png',
+      provider: CardImageProvider.protonDrive,
+      displayName: 'front.png',
+      mimeType: 'image/png',
+    );
+
+    final restored = CardImageRef.fromJson(image.toJson());
+    expect(restored, image);
+    expect(restored.kind, CardImageKind.remote);
+    expect(restored.uri, 'cards/front.png');
+    expect(restored.toJson().toString(), isNot(contains('token')));
+  });
+
+  test('wallet connections store companion credentials securely', () {
     final connections = const WalletConnections(
-      syncthingFolderUri: 'content://syncthing/tree/wallet-cards',
-      protonDriveConnected: true,
+      companionBaseUrl: 'https://wallet.example.test',
+      companionAccessToken: '0123456789abcdef0123456789abcdef',
+      legacySyncthingFolderUri: 'content://syncthing/tree/wallet-cards',
     );
 
     final restored = WalletConnections.fromJson(connections.toJson());
-    expect(restored.syncthingConnected, isTrue);
-    expect(restored.protonDriveConnected, isTrue);
+    expect(restored.companionConfigured, isTrue);
+    expect(restored.legacySyncthingFolderUri, startsWith('content://'));
 
-    final wiped = restored.copyWith(
-      clearSyncthingFolderUri: true,
-      protonDriveConnected: false,
-    );
-    expect(wiped.syncthingConnected, isFalse);
-    expect(wiped.protonDriveConnected, isFalse);
-
-    final payload = wiped.toJson().toString().toLowerCase();
-    expect(payload, isNot(contains('password')));
-    expect(payload, isNot(contains('credential')));
-    expect(payload, isNot(contains('token')));
-    expect(payload, isNot(contains('secret')));
+    final wiped = restored.copyWith(clearCompanion: true);
+    expect(wiped.companionConfigured, isFalse);
+    expect(wiped.legacySyncthingFolderUri, startsWith('content://'));
   });
 
   test(
-    'connection status is driven by provider availability and saved state',
-    () {
-      final notInstalled = connectionStateFor(
-        available: false,
-        connected: true,
+    'wallet connection store persists the companion configuration',
+    () async {
+      FlutterSecureStorage.setMockInitialValues({});
+      const secureStorage = FlutterSecureStorage();
+      const store = WalletConnectionStore(secureStorage: secureStorage);
+      const connections = WalletConnections(
+        companionBaseUrl: 'https://wallet.example.test',
+        companionAccessToken: '0123456789abcdef0123456789abcdef',
       );
-      expect(notInstalled.label, 'Not installed');
-      expect(notInstalled.detail, 'Set up connection');
-      expect(notInstalled.connected, isFalse);
 
-      final disconnected = connectionStateFor(
-        available: true,
-        connected: false,
-      );
-      expect(disconnected.label, 'Disconnected');
-      expect(disconnected.detail, 'Set up connection');
-      expect(disconnected.color, AkatorColors.textHint);
-      expect(disconnected.connected, isFalse);
+      await store.save(connections);
+      final restored = await store.load();
 
-      final connected = connectionStateFor(available: true, connected: true);
-      expect(connected.label, 'Connected');
-      expect(connected.detail, 'Show files or adjust settings');
-      expect(connected.connected, isTrue);
+      expect(restored.companionBaseUrl, connections.companionBaseUrl);
+      expect(restored.companionAccessToken, connections.companionAccessToken);
+      final stored = await secureStorage.readAll();
+      expect(stored.keys, contains('akator_wallet_connections_v1'));
+      expect(stored.keys, isNot(contains('akator_wallet_cards_v1')));
     },
   );
+
+  test('connection status is driven by companion and backend health', () {
+    final notConfigured = connectionStateFor(
+      configured: false,
+      available: false,
+    );
+    expect(notConfigured.label, 'Not configured');
+    expect(notConfigured.detail, 'Set up host companion');
+    expect(notConfigured.connected, isFalse);
+
+    final unavailable = connectionStateFor(configured: true, available: false);
+    expect(unavailable.label, 'Unavailable');
+    expect(unavailable.detail, 'Check host companion');
+    expect(unavailable.color, AkatorColors.danger);
+    expect(unavailable.connected, isFalse);
+
+    final connected = connectionStateFor(configured: true, available: true);
+    expect(connected.label, 'Connected');
+    expect(connected.detail, 'Show files or adjust settings');
+    expect(connected.connected, isTrue);
+  });
 }
