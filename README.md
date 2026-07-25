@@ -18,6 +18,15 @@ Android SDK, AVD, and Flutter cache state live under:
 ~/Dropbox/libraries/Android/optiplex/
 ```
 
+## Mobile Releases
+
+Merges to `main` create a signed APK in a private GitHub Release. The Android
+app shows the exact version, Git revision, and release tag under Wallet
+Settings > Build.
+
+See [Mobile release workflow](docs/mobile-release.md) for signing setup,
+Obtainium configuration, installation, verification, and key recovery.
+
 ## External Images
 
 Add Card supports Android Storage Access Framework image links for external

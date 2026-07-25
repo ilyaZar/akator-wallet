@@ -1,0 +1,147 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: set up java
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: set up flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: 3.29.2
+          cache: true
+
+      - name: get dependencies
+        run: flutter pub get
+
+      - name: analyze
+        run: flutter analyze
+
+      - name: test
+        run: flutter test
+
+      - name: derive release metadata
+        id: release
+        shell: bash
+        run: |
+          base_version="$(sed -n 's/^version: \([^+]*\).*/\1/p' pubspec.yaml)"
+          build_number="$((100000 + GITHUB_RUN_NUMBER))"
+          release_version="${base_version}-edge.${GITHUB_RUN_NUMBER}"
+          release_tag="build-${GITHUB_RUN_NUMBER}"
+          {
+            printf 'build_number=%s\n' "$build_number"
+            printf 'release_tag=%s\n' "$release_tag"
+            printf 'release_version=%s\n' "$release_version"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: restore release signing key
+        shell: bash
+        env:
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" |
+            base64 --decode >android/app/akator-wallet-release.jks
+          {
+            printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'storeFile=akator-wallet-release.jks\n'
+          } >android/key.properties
+
+      - name: build signed apk
+        shell: bash
+        env:
+          BUILD_NUMBER: ${{ steps.release.outputs.build_number }}
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.release_version }}
+        run: |
+          flutter build apk \
+            --release \
+            --build-name "$RELEASE_VERSION" \
+            --build-number "$BUILD_NUMBER" \
+            --dart-define "AKATOR_VERSION=$RELEASE_VERSION" \
+            --dart-define "AKATOR_BUILD_NUMBER=$BUILD_NUMBER" \
+            --dart-define "AKATOR_GIT_SHA=$GITHUB_SHA" \
+            --dart-define "AKATOR_RELEASE_TAG=$RELEASE_TAG"
+
+      - name: inspect signed apk
+        id: artifact
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.release_version }}
+        run: |
+          asset_name="akator-wallet-${RELEASE_VERSION}.apk"
+          asset_path="$RUNNER_TEMP/$asset_name"
+          cp build/app/outputs/flutter-apk/app-release.apk "$asset_path"
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum "$asset_name" >"$asset_name.sha256"
+          )
+          apksigner_path="$(
+            find "$ANDROID_HOME/build-tools" -name apksigner -type f |
+              sort -V |
+              tail -n 1
+          )"
+          "$apksigner_path" verify \
+            --verbose \
+            --print-certs \
+            "$asset_path" |
+            tee "$asset_path.cert.txt"
+          {
+            printf 'asset_path=%s\n' "$asset_path"
+            printf 'certificate_path=%s\n' "$asset_path.cert.txt"
+            printf 'checksum_path=%s\n' "$asset_path.sha256"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: publish github release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_PATH: ${{ steps.artifact.outputs.asset_path }}
+          CERTIFICATE_PATH: ${{ steps.artifact.outputs.certificate_path }}
+          CHECKSUM_PATH: ${{ steps.artifact.outputs.checksum_path }}
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.release_version }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload \
+              "$RELEASE_TAG" \
+              "$APK_PATH" \
+              "$CERTIFICATE_PATH" \
+              "$CHECKSUM_PATH" \
+              --clobber
+          else
+            gh release create \
+              "$RELEASE_TAG" \
+              "$APK_PATH" \
+              "$CERTIFICATE_PATH" \
+              "$CHECKSUM_PATH" \
+              --generate-notes \
+              --latest \
+              --target "$GITHUB_SHA" \
+              --title "Akator Wallet $RELEASE_VERSION"
+          fi

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:akator_wallet/build_info.dart';
 import 'package:akator_wallet/main.dart';
 import 'package:akator_wallet/wallet_card_store.dart';
 
@@ -56,6 +57,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Connection status'), findsOneWidget);
     expect(find.text('Set up connection'), findsWidgets);
+    await tester.drag(find.byType(ListView).last, const Offset(0, -500));
+    await tester.pumpAndSettle();
+    expect(find.text('Build'), findsOneWidget);
+    expect(find.text(AppBuildInfo.versionLabel), findsOneWidget);
+    expect(find.text(AppBuildInfo.revisionLabel), findsOneWidget);
+    expect(find.text(AppBuildInfo.releaseTag), findsOneWidget);
     await tapVisible(
       tester,
       find.byKey(const ValueKey('settings-connection-proton-drive')),
