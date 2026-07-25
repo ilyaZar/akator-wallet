@@ -87,10 +87,12 @@ func TestProtonBackendHealthAndList(t *testing.T) {
 }
 
 func TestProtonBackendRead(t *testing.T) {
+	var download []string
 	runner := runnerFunc(func(
 		_ context.Context,
 		arguments ...string,
 	) ([]byte, error) {
+		download = append([]string(nil), arguments...)
 		directory := arguments[len(arguments)-1]
 		if err := os.WriteFile(
 			filepath.Join(directory, "front.png"),
@@ -116,6 +118,18 @@ func TestProtonBackendRead(t *testing.T) {
 	}
 	if file.MIMEType != "image/png" {
 		t.Fatalf("unexpected MIME type: %s", file.MIMEType)
+	}
+	wantPrefix := []string{
+		"filesystem",
+		"download",
+		"-j",
+		"--file-conflict-strategy",
+		"replace",
+		"/my-files/Akator Wallet/cards/front.png",
+	}
+	if len(download) != len(wantPrefix)+1 ||
+		!reflect.DeepEqual(download[:len(wantPrefix)], wantPrefix) {
+		t.Fatalf("download arguments = %v, want prefix %v", download, wantPrefix)
 	}
 }
 
@@ -162,6 +176,12 @@ func TestProtonBackendWriteUsesSeparateArguments(t *testing.T) {
 	}
 	if upload[len(upload)-1] != "/my-files/Akator Wallet/cards" {
 		t.Fatalf("remote parent is not one argument: %v", upload)
+	}
+	if len(upload) != 7 ||
+		upload[2] != "-j" ||
+		upload[3] != "--file-conflict-strategy" ||
+		upload[4] != "replace" {
+		t.Fatalf("upload conflict arguments are invalid: %v", upload)
 	}
 }
 
