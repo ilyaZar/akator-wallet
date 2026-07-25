@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -260,5 +262,80 @@ func TestProtonBackendRedactsCommandAndJSONFailures(t *testing.T) {
 	}
 	if healthErr.Error() == "secret malformed response" {
 		t.Fatal("provider output leaked through error")
+	}
+}
+
+func TestProtonBackendReportsUnauthenticatedState(t *testing.T) {
+	runner := runnerFunc(func(
+		_ context.Context,
+		arguments ...string,
+	) ([]byte, error) {
+		if arguments[0] == "--version" {
+			return []byte("Proton Drive CLI cli-drive@0.6.0"), nil
+		}
+		return nil, ErrUnavailable
+	})
+	backend, err := NewProtonBackend(
+		"proton_drive",
+		"/my-files/Akator Wallet",
+		runner,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	healthErr := backend.Health(context.Background())
+	if !errors.Is(healthErr, ErrUnavailable) {
+		t.Fatalf("got %v, want unavailable", healthErr)
+	}
+}
+
+func TestExecRunnerTimeoutAndErrorRedaction(t *testing.T) {
+	runner := ExecRunner{Binary: os.Args[0]}
+
+	t.Run("timeout", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		defer cancel()
+		_, err := runner.Output(
+			ctx,
+			"-test.run=^TestProtonRunnerHelper$",
+			"--",
+			"timeout",
+		)
+		if !errors.Is(err, ErrUnavailable) ||
+			!strings.Contains(err.Error(), "timed out") {
+			t.Fatalf("got %v, want redacted timeout", err)
+		}
+	})
+
+	t.Run("provider failure", func(t *testing.T) {
+		_, err := runner.Output(
+			context.Background(),
+			"-test.run=^TestProtonRunnerHelper$",
+			"--",
+			"provider-failure",
+		)
+		if !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("got %v, want unavailable", err)
+		}
+		if strings.Contains(err.Error(), "private-user@example.test") {
+			t.Fatal("provider diagnostics leaked through error")
+		}
+	})
+}
+
+func TestProtonRunnerHelper(t *testing.T) {
+	if len(os.Args) == 0 {
+		return
+	}
+	switch os.Args[len(os.Args)-1] {
+	case "timeout":
+		time.Sleep(time.Hour)
+	case "provider-failure":
+		_, _ = fmt.Fprintln(
+			os.Stderr,
+			"authentication failed for private-user@example.test",
+		)
+		os.Exit(23)
 	}
 }
