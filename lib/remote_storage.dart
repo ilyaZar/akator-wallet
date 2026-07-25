@@ -285,7 +285,9 @@ Uri validateCompanionBaseUrl(String value, {bool allowInsecureHttp = false}) {
       uri.userInfo.isNotEmpty) {
     throw const FormatException('Invalid companion URL');
   }
-  if (uri.scheme != 'https' && !(allowInsecureHttp && uri.scheme == 'http')) {
+  final loopbackHTTP =
+      allowInsecureHttp && uri.scheme == 'http' && _isLoopbackHost(uri.host);
+  if (uri.scheme != 'https' && !loopbackHTTP) {
     throw const FormatException('Companion URL must use HTTPS');
   }
   final normalizedPath =
@@ -293,6 +295,13 @@ Uri validateCompanionBaseUrl(String value, {bool allowInsecureHttp = false}) {
           ? ''
           : uri.path.replaceFirst(RegExp(r'/$'), '');
   return uri.replace(path: normalizedPath);
+}
+
+bool _isLoopbackHost(String host) {
+  if (host.toLowerCase() == 'localhost') {
+    return true;
+  }
+  return InternetAddress.tryParse(host)?.isLoopback ?? false;
 }
 
 CardImageProvider? _providerForBackend(String? backend) {

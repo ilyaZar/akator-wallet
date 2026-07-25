@@ -25,6 +25,30 @@ void main() {
       'http://127.0.0.1:8787',
     );
     expect(
+      validateCompanionBaseUrl(
+        'http://localhost:8787',
+        allowInsecureHttp: true,
+      ).toString(),
+      'http://localhost:8787',
+    );
+    expect(
+      validateCompanionBaseUrl(
+        'http://[::1]:8787',
+        allowInsecureHttp: true,
+      ).toString(),
+      'http://[::1]:8787',
+    );
+    for (final insecureUrl in [
+      'http://192.168.1.10:8787',
+      'http://wallet-host.local:8787',
+      'http://127.0.0.1.example.test:8787',
+    ]) {
+      expect(
+        () => validateCompanionBaseUrl(insecureUrl, allowInsecureHttp: true),
+        throwsFormatException,
+      );
+    }
+    expect(
       () => validateCompanionBaseUrl('https://token@example.test:8787'),
       throwsFormatException,
     );
