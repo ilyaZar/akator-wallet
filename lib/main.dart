@@ -8,6 +8,7 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'build_info.dart';
 import 'wallet_card_store.dart';
 
 void main() {
@@ -4166,6 +4167,22 @@ class WalletSettingsDrawer extends StatelessWidget {
                       ),
                     );
                   },
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            SettingsPanel(
+              title: 'Build',
+              children: [
+                SettingsTextTile(
+                  title: 'Version',
+                  lines: [AppBuildInfo.versionLabel],
+                  showChevron: false,
+                ),
+                SettingsTextTile(
+                  title: 'Revision',
+                  lines: [AppBuildInfo.revisionLabel, AppBuildInfo.releaseTag],
+                  showChevron: false,
                 ),
               ],
             ),
