@@ -82,7 +82,29 @@ systemctl --user enable --now syncthing.service
 systemctl --user is-active syncthing.service
 ```
 
-Create the dedicated root and add it without assigning devices:
+If an existing Syncthing folder already contains the wallet images, point the
+companion at that existing directory. For example, if `~/Syncthing` is already
+a configured Syncthing folder:
+
+```sh
+install -d -m 700 "$HOME/Syncthing/wallet-cards"
+```
+
+Do not add `wallet-cards` as a second Syncthing folder. It is an ordinary
+directory managed by the existing parent folder and inherits that folder's
+mode, peers, watching, rescans, ignores, and versioning. Review those inherited
+settings before storing sensitive images.
+
+Ignore the companion's short-lived atomic upload files in the parent folder's
+`.stignore`:
+
+```text
+// Akator writes atomic temporary files before the final rename.
+(?d).akator-upload-*
+```
+
+For a fresh setup without an existing managed folder, create a dedicated root
+and add it without assigning devices:
 
 ```sh
 install -d -m 700 "$HOME/Work/akator-wallet-storage/syncthing"
@@ -160,7 +182,7 @@ Create `~/.config/akator-wallet/companion.env` with mode `0600`:
 ```text
 AKATOR_COMPANION_LISTEN=127.0.0.1:8787
 AKATOR_COMPANION_TOKEN_FILE=/home/USER/.config/akator-wallet/companion-token
-AKATOR_SYNCTHING_ROOT=/home/USER/Work/akator-wallet-storage/syncthing
+AKATOR_SYNCTHING_ROOT=/home/USER/Syncthing/wallet-cards
 AKATOR_PROTON_ROOT="/my-files/Akator Wallet"
 AKATOR_PROTON_CLI=/home/USER/.local/bin/proton-drive
 ```

@@ -63,8 +63,14 @@ image storage. The official daemon already implements that protocol.
 The official
 [autostart guide](https://docs.syncthing.net/users/autostart.html) documents
 running Syncthing as the normal user. The host uses the existing user service.
-The wallet folder uses send-and-receive mode, file watching, periodic rescans,
-and staggered versioning with a one-year maximum age.
+The companion can use a dedicated directory inside an existing Syncthing
+folder without registering that directory as a second, nested Syncthing
+folder. It then inherits the parent folder's mode, peer sharing, file watching,
+rescan, and versioning behavior.
+
+A fresh standalone wallet folder should use send-and-receive mode, file
+watching, periodic rescans, and staggered versioning with a one-year maximum
+age.
 [Versioning](https://docs.syncthing.net/users/versioning.html) protects local
 copies when a remote peer replaces or deletes a file. It does not archive this
 host's own local changes, so it is a recovery layer rather than a complete
@@ -188,19 +194,21 @@ offline mirroring is not implemented.
 The configured workstation uses:
 
 - the existing official Syncthing user service
-- folder ID `akator-wallet-images`
-- local root `~/Work/akator-wallet-storage/syncthing`
-- send-and-receive mode
-- file watching and an hourly full rescan
-- staggered versioning with a one-year maximum age
-- no automatically selected peer
+- existing folder ID `home-syncthing` at `~/Syncthing`
+- companion root `~/Syncthing/wallet-cards`
+- the existing parent folder's send-and-receive and peer configuration
+- the existing parent folder's file watching and rescan behavior
+- no Syncthing versioning on the existing parent folder
+- an ignore for the companion's short-lived atomic upload files
 - official Proton Drive CLI 0.6.0
 - Proton root `/my-files/Akator Wallet`
 - a loopback-only companion user service
 
-The Syncthing folder is indexed and healthy, but it is intentionally not shared
-with every existing peer. A live cross-device synchronization check requires
-an explicit peer choice. See the companion runbook for that final step.
+The companion listed the existing images and passed a live upload, download,
+byte comparison, local Syncthing indexing, and cleanup round trip. The original
+image set remained unchanged. A connected existing peer had a pre-existing
+backlog and did not complete within the bounded verification window, so
+cross-peer completion is not claimed.
 
 ## Limitations
 
@@ -214,5 +222,7 @@ an explicit peer choice. See the companion runbook for that final step.
 - Remote images have a loading and unavailable state but no persistent offline
   cache.
 - Release use from a physical phone requires an HTTPS route to the companion.
-- Syncthing cross-device proof remains pending until a peer is explicitly
-  chosen and accepts this dedicated folder.
+- An existing parent Syncthing folder controls wallet peer sharing and
+  versioning. Changing those settings affects every file in that parent.
+- Cross-peer completion remains unproven while the existing peer backlog
+  remains.
