@@ -1,14 +1,14 @@
 # Mobile Release Workflow
 
-This project uses one private release lane:
+This project uses one public release lane:
 
 ```text
-ChatGPT Remote on phone
+ChatGPT app on phone
   -> Codex on the development host
   -> branch and pull request
   -> merge to main
   -> GitHub Actions tests and signs the APK
-  -> private GitHub Release
+  -> public GitHub Release
   -> Obtainium update on Android
 ```
 
@@ -46,6 +46,9 @@ The keystore must never be committed. Keep at least one encrypted backup
 outside this computer. Losing the signing key means installed copies cannot be
 updated in place.
 
+GitHub Actions secrets cannot be read back. The encrypted keystore backup and
+its recovery password therefore need independent recovery copies.
+
 For a local release build, copy `android/key.properties.example` to
 `android/key.properties`, use the real values, and point `storeFile` at the
 absolute keystore path.
@@ -58,12 +61,9 @@ The official Proton Pass CLI source is checked out at:
 ~/Dropbox/projects/proton/pass-cli
 ```
 
-It is pinned to the latest stable source tag. After installation, authenticate
-without exposing account credentials to an agent:
-
-```sh
-pass-cli login
-```
+It is pinned to the latest stable source tag. Proton limits CLI access by
+account plan. Use Proton Pass Web when the account is not eligible for CLI
+access.
 
 Store the release password as a Proton Pass login item named
 `Akator Wallet release signing`. Include the key alias, certificate
@@ -83,43 +83,35 @@ The first permanent signed release replaces the old debug-signed build:
 This clean reinstall is required only for the signing-key migration. Future
 releases update in place and preserve app data.
 
-## Obtainium for the Private Repository
+Do not uninstall a debug build with valuable private data. First add an in-app
+export/import path or explicitly confirm that the data is disposable. A raw
+ADB backup cannot be restored directly into a non-debuggable release.
+
+## Obtainium
 
 Install Obtainium from its official GitHub Release. In Obtainium:
 
-1. Create a fine-grained GitHub personal access token.
-2. Limit the token to `ilyaZar/akator-wallet`.
-3. Grant read-only repository contents access.
-4. Enter the token under Settings > Source-specific > GitHub.
-5. Add `https://github.com/ilyaZar/akator-wallet`.
-6. Select the `akator-wallet-*.apk` release asset if prompted.
+1. Add `https://github.com/ilyaZar/akator-wallet`.
+2. Leave prereleases disabled.
+3. Confirm that Obtainium detects the latest `build-<number>` release.
+4. Select the `akator-wallet-*.apk` release asset if prompted.
 
-Keep the token on the phone. Do not paste it into a Codex prompt, commit it, or
-store it in an issue or pull request.
+The public release feed needs no GitHub account or phone-side access token.
 
 ## Routine While Away
 
-1. Open Remote in the ChatGPT Android app.
+1. Open this Codex task in the ChatGPT Android app.
 2. Start or continue the Codex task on the development host.
 3. Ask Codex to implement, test, commit, push, and open a pull request.
-4. Review the diff and checks in ChatGPT Remote or GitHub Mobile.
+4. Review the diff and checks in ChatGPT or GitHub Mobile.
 5. Merge the pull request.
 6. Wait for the `release` workflow to publish a new GitHub Release.
 7. Install the update from Obtainium.
 8. Confirm Wallet Settings > Build matches the merged commit and release.
 
 The development host must stay awake, online, and running the Codex app for
-local Remote tasks. GitHub Actions continues independently after code is
-pushed.
-
-## Initial Remote Pairing
-
-Start Remote setup in the Codex app on the host. Scan its pairing code from the
-Remote section of the ChatGPT Android app while both devices use the same
-ChatGPT account and workspace.
-
-The host must stay awake, online, and running Codex. Pairing does not expose the
-Codex app server directly to the public internet.
+tasks that execute on this computer. GitHub Actions continues independently
+after code is pushed.
 
 ## Verification
 
