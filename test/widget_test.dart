@@ -35,17 +35,19 @@ void main() {
     expect(find.text('Connections'), findsOneWidget);
     expect(find.text('Syncthing'), findsOneWidget);
     expect(find.text('Proton Drive'), findsOneWidget);
-    expect(find.text('Not installed'), findsWidgets);
+    expect(find.text('Not configured'), findsWidgets);
 
     await tester.tap(find.byKey(const ValueKey('drawer-connection-syncthing')));
     await tester.pumpAndSettle();
     expect(find.byType(ConnectionsSheet), findsOneWidget);
     expect(
-      find.text('Akator stores provider status and folder permission only.'),
+      find.textContaining(
+        'Akator connects to provider tooling on a companion host.',
+      ),
       findsOneWidget,
     );
     expect(
-      find.text('Use the Proton Drive app. Credentials stay there.'),
+      find.textContaining('explicit encrypted Proton Drive operations'),
       findsOneWidget,
     );
     expect(find.text('Set up connection'), findsWidgets);
@@ -56,7 +58,7 @@ void main() {
     await tester.tap(find.byTooltip('Open settings'));
     await tester.pumpAndSettle();
     expect(find.text('Connection status'), findsOneWidget);
-    expect(find.text('Set up connection'), findsWidgets);
+    expect(find.text('Set up host companion'), findsWidgets);
     await tester.drag(find.byType(ListView).last, const Offset(0, -500));
     await tester.pumpAndSettle();
     expect(find.text('Build'), findsOneWidget);

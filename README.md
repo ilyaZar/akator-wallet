@@ -27,21 +27,24 @@ Settings > Build.
 See [Mobile release workflow](docs/mobile-release.md) for signing setup,
 Obtainium configuration, installation, verification, and key recovery.
 
-## External Images
+## Host-backed images
 
-Add Card supports Android Storage Access Framework image links for external
-sources:
+Syncthing and Proton Drive run on a companion computer, not on Android. The app
+uses a narrow authenticated companion API to browse, read, and write card
+images. Syncthing-Fork and the Proton Drive Android app are not required.
 
-- Syncthing expects Syncthing-Fork on the phone and a normal Android-visible
-  synced folder. The app asks once for folder access, then stores linked
-  `content://` image references.
-- Proton Drive expects the official Android app package
-  `me.proton.android.drive`. If it is not installed, the app shows a quiet
-  in-form message instead of opening a generic picker.
+- Syncthing images live in a dedicated directory managed by the official
+  Syncthing daemon.
+- Proton Drive images use explicit operations from the official Proton Drive
+  CLI. This is not continuous local-folder synchronization.
+- The companion URL and token are stored in Android secure storage. Remote card
+  references contain a backend and relative object path, never the token.
+- Old Android `content://` image references remain readable for migration
+  compatibility.
 
-Accepted external images are copied only to a temporary local file for cropping.
-When cropping is saved, the cropped file is created through SAF and the card
-keeps the resulting external URI.
+See [Network storage architecture](docs/network-storage.md) for the reviewed
+official integration choices, trust model, setup, and limitations. See the
+[companion runbook](companion/README.md) to build and operate the host service.
 
 ## Demo Assets
 

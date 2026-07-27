@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -9,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'build_info.dart';
+import 'remote_storage.dart';
 import 'wallet_card_store.dart';
 
 void main() {
@@ -53,72 +55,77 @@ Future<CroppedFile?> cropCardImage(String sourcePath) {
   );
 }
 
-Future<CardImageRef?> pickCardImageFromExternal({
+Future<CardImageRef?> pickCardImageFromRemote({
+  required BuildContext context,
   required AddCardSource source,
-  required String? folderUri,
+  required RemoteStorage storage,
 }) async {
   final provider = imageProviderForSource(source);
-  final selection = await ExternalImageBridge.pickImage(initialUri: folderUri);
-  if (selection == null) {
+  final entry = await showRemoteImageBrowser(
+    context,
+    storage: storage,
+    provider: provider,
+    selectImage: true,
+  );
+  if (entry == null) {
     return null;
   }
 
-  final cachedPath = await ExternalImageBridge.cacheImage(
-    selection.uri,
-    selection.displayName,
-  );
-  if (cachedPath == null) {
-    return CardImageRef.externalUri(
-      uri: selection.uri,
-      provider: provider,
-      displayName: selection.displayName,
-      mimeType: selection.mimeType,
+  final temporary = await Directory.systemTemp.createTemp('akator-crop-');
+  try {
+    final sourceFile = File('${temporary.path}/${entry.name}');
+    await sourceFile.writeAsBytes(
+      await storage.read(provider, entry.path),
+      flush: true,
     );
-  }
-
-  final croppedImage = await ImageCropper().cropImage(
-    sourcePath: cachedPath,
-    maxWidth: 2400,
-    maxHeight: 1519,
-    aspectRatio: const CropAspectRatio(ratioX: 158, ratioY: 100),
-    uiSettings: [
-      AndroidUiSettings(
-        toolbarTitle: 'Crop card image',
-        toolbarColor: AkatorColors.primaryStrong,
-        toolbarWidgetColor: AkatorColors.textInverted,
-        activeControlsWidgetColor: AkatorColors.primaryStrong,
-        cropFrameColor: AkatorColors.primaryStrong,
-        cropGridColor: AkatorColors.primaryBorder,
-        backgroundColor: AkatorColors.backgroundNorm,
-        lockAspectRatio: true,
-      ),
-    ],
-  );
-
-  if (croppedImage == null) {
-    return CardImageRef.externalUri(
-      uri: selection.uri,
-      provider: provider,
-      displayName: selection.displayName,
-      mimeType: selection.mimeType,
+    final croppedImage = await ImageCropper().cropImage(
+      sourcePath: sourceFile.path,
+      maxWidth: 2400,
+      maxHeight: 1519,
+      aspectRatio: const CropAspectRatio(ratioX: 158, ratioY: 100),
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: 'Crop card image',
+          toolbarColor: AkatorColors.primaryStrong,
+          toolbarWidgetColor: AkatorColors.textInverted,
+          activeControlsWidgetColor: AkatorColors.primaryStrong,
+          cropFrameColor: AkatorColors.primaryStrong,
+          cropGridColor: AkatorColors.primaryBorder,
+          backgroundColor: AkatorColors.backgroundNorm,
+          lockAspectRatio: true,
+        ),
+      ],
     );
+
+    if (croppedImage == null) {
+      return CardImageRef.remote(
+        path: entry.path,
+        provider: provider,
+        displayName: entry.name,
+        mimeType: entry.mimeType,
+      );
+    }
+
+    final displayName = croppedDisplayName(entry.name);
+    final parent = remoteParentPath(entry.path);
+    final saved = await storage.write(
+      provider,
+      remoteChildPath(parent, displayName),
+      await File(croppedImage.path).readAsBytes(),
+    );
+    return CardImageRef.remote(
+      path: saved.path,
+      provider: provider,
+      displayName: saved.name,
+      mimeType: saved.mimeType,
+    );
+  } finally {
+    try {
+      await temporary.delete(recursive: true);
+    } on FileSystemException {
+      // The operating system will eventually clear its temporary directory.
+    }
   }
-
-  final saved = await ExternalImageBridge.saveCroppedImage(
-    provider: provider,
-    folderUri: folderUri,
-    sourceUri: selection.uri,
-    filePath: croppedImage.path,
-    displayName: croppedDisplayName(selection.displayName),
-    mimeType: selection.mimeType,
-  );
-
-  return CardImageRef.externalUri(
-    uri: saved?.uri ?? selection.uri,
-    provider: provider,
-    displayName: saved?.displayName ?? selection.displayName,
-    mimeType: saved?.mimeType ?? selection.mimeType,
-  );
 }
 
 Widget walletImage(CardImageRef image, {Key? key, BoxFit fit = BoxFit.cover}) {
@@ -128,119 +135,15 @@ Widget walletImage(CardImageRef image, {Key? key, BoxFit fit = BoxFit.cover}) {
   if (image.kind == CardImageKind.externalUri) {
     return ExternalWalletImage(image: image, key: key, fit: fit);
   }
+  if (image.kind == CardImageKind.remote) {
+    return RemoteWalletImage(image: image, key: key, fit: fit);
+  }
 
   return Image.file(File(image.uri), key: key, fit: fit);
 }
 
-class ExternalImageSelection {
-  const ExternalImageSelection({
-    required this.uri,
-    required this.displayName,
-    required this.mimeType,
-  });
-
-  final String uri;
-  final String displayName;
-  final String mimeType;
-
-  factory ExternalImageSelection.fromMap(Map<dynamic, dynamic> data) {
-    return ExternalImageSelection(
-      uri: data['uri'] as String,
-      displayName:
-          data['displayName'] as String? ??
-          displayNameForUri(data['uri'] as String),
-      mimeType: data['mimeType'] as String? ?? 'image/*',
-    );
-  }
-}
-
 class ExternalImageBridge {
   static const _channel = MethodChannel('com.akator.wallet/external_images');
-
-  static Future<bool> isProviderAvailable(CardImageProvider provider) async {
-    if (!Platform.isAndroid) {
-      return false;
-    }
-    return await _channel.invokeMethod<bool>('isExternalProviderAvailable', {
-          'provider': provider.storageKey,
-        }) ??
-        false;
-  }
-
-  static Future<String?> pickSyncthingFolder() async {
-    if (!Platform.isAndroid) {
-      return null;
-    }
-    return _channel.invokeMethod<String>('pickSyncthingFolder');
-  }
-
-  static Future<bool> openProviderFiles(
-    CardImageProvider provider, {
-    String? initialUri,
-  }) async {
-    if (!Platform.isAndroid) {
-      return false;
-    }
-    return await _channel.invokeMethod<bool>('openProviderFiles', {
-          'provider': provider.storageKey,
-          'initialUri': initialUri,
-        }) ??
-        false;
-  }
-
-  static Future<bool> openProviderApp(CardImageProvider provider) async {
-    if (!Platform.isAndroid) {
-      return false;
-    }
-    return await _channel.invokeMethod<bool>('openProviderApp', {
-          'provider': provider.storageKey,
-        }) ??
-        false;
-  }
-
-  static Future<ExternalImageSelection?> pickImage({String? initialUri}) async {
-    if (!Platform.isAndroid) {
-      return null;
-    }
-    final data = await _channel.invokeMapMethod<String, Object?>(
-      'pickExternalImage',
-      {'initialUri': initialUri},
-    );
-    return data == null ? null : ExternalImageSelection.fromMap(data);
-  }
-
-  static Future<String?> cacheImage(String uri, String displayName) async {
-    if (!Platform.isAndroid) {
-      return null;
-    }
-    return _channel.invokeMethod<String>('cacheExternalImage', {
-      'uri': uri,
-      'displayName': displayName,
-    });
-  }
-
-  static Future<ExternalImageSelection?> saveCroppedImage({
-    required CardImageProvider provider,
-    required String? folderUri,
-    required String sourceUri,
-    required String filePath,
-    required String displayName,
-    required String mimeType,
-  }) async {
-    if (!Platform.isAndroid) {
-      return null;
-    }
-    final data = await _channel
-        .invokeMapMethod<String, Object?>('saveCroppedExternalImage', {
-          'provider': provider.storageKey,
-          'folderUri': folderUri,
-          'sourceUri': sourceUri,
-          'filePath': filePath,
-          'displayName': displayName,
-          'mimeType': mimeType,
-        });
-    return data == null ? null : ExternalImageSelection.fromMap(data);
-  }
 
   static Future<Uint8List?> readImage(String uri) async {
     if (!Platform.isAndroid) {
@@ -285,6 +188,81 @@ class ExternalWalletImage extends StatelessWidget {
   }
 }
 
+class RemoteStorageScope extends InheritedWidget {
+  const RemoteStorageScope({
+    required this.storage,
+    required super.child,
+    super.key,
+  });
+
+  final RemoteStorage? storage;
+
+  static RemoteStorage? maybeOf(BuildContext context) {
+    return context
+        .dependOnInheritedWidgetOfExactType<RemoteStorageScope>()
+        ?.storage;
+  }
+
+  @override
+  bool updateShouldNotify(RemoteStorageScope oldWidget) {
+    return storage != oldWidget.storage;
+  }
+}
+
+class RemoteWalletImage extends StatefulWidget {
+  const RemoteWalletImage({required this.image, required this.fit, super.key});
+
+  final CardImageRef image;
+  final BoxFit fit;
+
+  @override
+  State<RemoteWalletImage> createState() => _RemoteWalletImageState();
+}
+
+class _RemoteWalletImageState extends State<RemoteWalletImage> {
+  RemoteStorage? _storage;
+  Future<Uint8List>? _bytes;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final storage = RemoteStorageScope.maybeOf(context);
+    if (!identical(storage, _storage)) {
+      _storage = storage;
+      _bytes = storage?.read(widget.image.provider, widget.image.uri);
+    }
+  }
+
+  @override
+  void didUpdateWidget(RemoteWalletImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.image != widget.image) {
+      _bytes = _storage?.read(widget.image.provider, widget.image.uri);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _bytes;
+    if (bytes == null) {
+      return const MissingCardImage();
+    }
+    return FutureBuilder<Uint8List>(
+      future: bytes,
+      builder: (context, snapshot) {
+        final data = snapshot.data;
+        if (data != null) {
+          return Image.memory(data, fit: widget.fit);
+        }
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const ColoredBox(color: AkatorColors.backgroundSecondary);
+        }
+        return const MissingCardImage();
+      },
+    );
+  }
+}
+
 class MissingCardImage extends StatelessWidget {
   const MissingCardImage({super.key});
 
@@ -303,6 +281,198 @@ class MissingCardImage extends StatelessWidget {
   }
 }
 
+Future<RemoteStorageEntry?> showRemoteImageBrowser(
+  BuildContext context, {
+  required RemoteStorage storage,
+  required CardImageProvider provider,
+  bool selectImage = false,
+}) {
+  return showModalBottomSheet<RemoteStorageEntry>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: AkatorColors.backgroundSecondary,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+    ),
+    builder:
+        (context) => RemoteImageBrowser(
+          storage: storage,
+          provider: provider,
+          selectImage: selectImage,
+        ),
+  );
+}
+
+class RemoteImageBrowser extends StatefulWidget {
+  const RemoteImageBrowser({
+    required this.storage,
+    required this.provider,
+    required this.selectImage,
+    super.key,
+  });
+
+  final RemoteStorage storage;
+  final CardImageProvider provider;
+  final bool selectImage;
+
+  @override
+  State<RemoteImageBrowser> createState() => _RemoteImageBrowserState();
+}
+
+class _RemoteImageBrowserState extends State<RemoteImageBrowser> {
+  String _path = '';
+  List<RemoteStorageEntry>? _entries;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _entries = null;
+      _error = null;
+    });
+    try {
+      final entries = await widget.storage.list(widget.provider, path: _path);
+      if (mounted) {
+        setState(() => _entries = entries);
+      }
+    } on RemoteStorageException catch (error) {
+      if (mounted) {
+        setState(() => _error = remoteStorageMessage(error));
+      }
+    }
+  }
+
+  void _open(RemoteStorageEntry entry) {
+    if (entry.isFolder) {
+      _path = entry.path;
+      unawaited(_load());
+      return;
+    }
+    if (entry.isImage && widget.selectImage) {
+      Navigator.of(context).pop(entry);
+    }
+  }
+
+  void _up() {
+    _path = remoteParentPath(_path);
+    unawaited(_load());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final providerName =
+        widget.provider == CardImageProvider.syncthing
+            ? 'Syncthing host'
+            : 'Proton Drive host';
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.78,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: 'Parent folder',
+                  onPressed: _path.isEmpty ? null : _up,
+                  icon: const Icon(Icons.chevron_left_rounded),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        providerName,
+                        style: WalletStyles.subheadline(
+                          color: AkatorColors.textNorm,
+                        ),
+                      ),
+                      Text(
+                        _path.isEmpty ? 'Wallet storage' : _path,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: WalletStyles.captionRegular(
+                          color: AkatorColors.textWeak,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Refresh files',
+                  onPressed: _load,
+                  icon: const Icon(Icons.refresh_rounded),
+                ),
+                IconButton(
+                  tooltip: 'Close files',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(child: _buildBody()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    final error = _error;
+    if (error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(error, textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              FilledButton.tonal(onPressed: _load, child: const Text('Retry')),
+            ],
+          ),
+        ),
+      );
+    }
+    final entries = _entries;
+    if (entries == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (entries.isEmpty) {
+      return const Center(child: Text('No image files in this folder'));
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.all(12),
+      itemCount: entries.length,
+      separatorBuilder: (_, _) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final entry = entries[index];
+        return ListTile(
+          leading: Icon(
+            entry.isFolder ? Icons.folder_outlined : Icons.image_outlined,
+          ),
+          title: Text(entry.name),
+          trailing:
+              entry.isFolder
+                  ? const Icon(Icons.chevron_right_rounded)
+                  : widget.selectImage
+                  ? const Icon(Icons.add_rounded)
+                  : null,
+          onTap:
+              entry.isFolder || widget.selectImage ? () => _open(entry) : null,
+        );
+      },
+    );
+  }
+}
+
 CardImageProvider imageProviderForSource(AddCardSource source) {
   return switch (source) {
     AddCardSource.image => CardImageProvider.internal,
@@ -317,6 +487,27 @@ String croppedDisplayName(String displayName) {
     return '${displayName}_cropped.jpg';
   }
   return '${displayName.substring(0, dot)}_cropped${displayName.substring(dot)}';
+}
+
+String remoteParentPath(String value) {
+  final slash = value.lastIndexOf('/');
+  return slash <= 0 ? '' : value.substring(0, slash);
+}
+
+String remoteChildPath(String parent, String child) {
+  return parent.isEmpty ? child : '$parent/$child';
+}
+
+String remoteStorageMessage(RemoteStorageException error) {
+  return switch (error.code) {
+    'unauthorized' => 'The companion access token was rejected.',
+    'unreachable' => 'The storage companion is unreachable.',
+    'tls_failed' => 'The storage companion TLS connection failed.',
+    'backend_unavailable' => 'The selected host backend is unavailable.',
+    'timeout' => 'The storage companion did not respond in time.',
+    'image_too_large' => 'The selected image is too large.',
+    _ => 'Could not access remote wallet storage.',
+  };
 }
 
 class AkatorWalletApp extends StatelessWidget {
@@ -377,6 +568,8 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   late final WalletConnectionStore _connectionStore;
   WalletConnections _connections = const WalletConnections();
+  CompanionStorageClient? _remoteStorage;
+  String? _remoteStorageKey;
   bool _syncthingAvailable = false;
   bool _protonDriveAvailable = false;
   bool _section1Open = true;
@@ -391,14 +584,20 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
   }
 
   Future<ConnectionSnapshot> _refreshConnections() async {
-    final results = await Future.wait([
-      _connectionStore.load(),
-      ExternalImageBridge.isProviderAvailable(CardImageProvider.syncthing),
-      ExternalImageBridge.isProviderAvailable(CardImageProvider.protonDrive),
-    ]);
-    final connections = results[0] as WalletConnections;
-    final syncthingAvailable = results[1] as bool;
-    final protonDriveAvailable = results[2] as bool;
+    final connections = await _connectionStore.load();
+    _replaceRemoteStorage(connections);
+    var syncthingAvailable = false;
+    var protonDriveAvailable = false;
+    final storage = _remoteStorage;
+    if (storage != null) {
+      try {
+        final health = await storage.health();
+        syncthingAvailable = health.available(CardImageProvider.syncthing);
+        protonDriveAvailable = health.available(CardImageProvider.protonDrive);
+      } on RemoteStorageException {
+        // Availability is reflected in the connection status below.
+      }
+    }
 
     if (mounted) {
       setState(() {
@@ -426,77 +625,30 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
   }
 
   Future<ConnectionActionResult> _setupSyncthingConnection() async {
-    final available = await ExternalImageBridge.isProviderAvailable(
-      CardImageProvider.syncthing,
-    );
-    if (!available) {
-      final snapshot = await _refreshConnections();
-      return ConnectionActionResult(
-        snapshot: snapshot,
-        message: 'Syncthing is not installed on this device',
-      );
-    }
-
-    final folderUri = await ExternalImageBridge.pickSyncthingFolder();
-    if (folderUri == null) {
-      final snapshot = await _refreshConnections();
-      return ConnectionActionResult(snapshot: snapshot);
-    }
-
-    final snapshot = await _saveConnections(
-      _connections.copyWith(syncthingFolderUri: folderUri),
-    );
-    return ConnectionActionResult(
-      snapshot: snapshot,
-      message: 'Syncthing folder connected',
-    );
+    return _configureCompanionConnection();
   }
 
   Future<ConnectionActionResult> _setupProtonDriveConnection() async {
-    final available = await ExternalImageBridge.isProviderAvailable(
-      CardImageProvider.protonDrive,
-    );
-    if (!available) {
-      final snapshot = await _refreshConnections();
-      return ConnectionActionResult(
-        snapshot: snapshot,
-        message: 'Proton Drive is not installed on this device',
-      );
-    }
-
-    final snapshot = await _saveConnections(
-      _connections.copyWith(protonDriveConnected: true),
-    );
-    return ConnectionActionResult(
-      snapshot: snapshot,
-      message: 'Proton Drive connected',
-    );
+    return _configureCompanionConnection();
   }
 
   Future<ConnectionActionResult> _deleteSyncthingConnection() async {
     final snapshot = await _saveConnections(
-      _connections.copyWith(clearSyncthingFolderUri: true),
+      _connections.copyWith(clearCompanion: true),
     );
     return ConnectionActionResult(
       snapshot: snapshot,
-      message: 'Syncthing connection removed',
+      message: 'Storage companion connection removed',
     );
   }
 
   Future<ConnectionActionResult> _deleteProtonDriveConnection() async {
-    final snapshot = await _saveConnections(
-      _connections.copyWith(protonDriveConnected: false),
-    );
-    return ConnectionActionResult(
-      snapshot: snapshot,
-      message: 'Proton Drive connection removed',
-    );
+    return _deleteSyncthingConnection();
   }
 
   Future<ConnectionActionResult> _showSyncthingFiles() {
     return _showProviderFiles(
       CardImageProvider.syncthing,
-      folderUri: _connections.syncthingFolderUri,
       providerName: 'Syncthing',
     );
   }
@@ -511,58 +663,100 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
   Future<ConnectionActionResult> _showProviderFiles(
     CardImageProvider provider, {
     required String providerName,
-    String? folderUri,
   }) async {
-    final opened = await ExternalImageBridge.openProviderFiles(
-      provider,
-      initialUri: folderUri,
-    );
+    final storage = _remoteStorage;
+    if (storage == null) {
+      return ConnectionActionResult(
+        snapshot: await _refreshConnections(),
+        message: 'Configure the storage companion first',
+      );
+    }
+    await showRemoteImageBrowser(context, storage: storage, provider: provider);
     final snapshot = await _refreshConnections();
+    return ConnectionActionResult(snapshot: snapshot);
+  }
+
+  Future<ConnectionActionResult> _configureCompanionConnection() async {
+    final submitted = await showDialog<CompanionConnectionInput>(
+      context: context,
+      builder:
+          (context) => CompanionConnectionDialog(
+            initialEndpoint:
+                _connections.companionBaseUrl ??
+                (kDebugMode ? 'http://127.0.0.1:8787' : 'https://'),
+            initialToken: _connections.companionAccessToken ?? '',
+          ),
+    );
+    if (submitted == null) {
+      return ConnectionActionResult(snapshot: await _refreshConnections());
+    }
+    final endpoint = submitted.endpoint;
+    final token = submitted.token;
+
+    CompanionStorageClient? candidate;
+    try {
+      candidate = CompanionStorageClient(
+        baseUrl: endpoint,
+        accessToken: token,
+        allowInsecureHttp: kDebugMode,
+      );
+      await candidate.health();
+    } on FormatException {
+      return ConnectionActionResult(
+        snapshot: await _refreshConnections(),
+        message: 'Enter a valid secure companion URL and token',
+      );
+    } on RemoteStorageException catch (error) {
+      return ConnectionActionResult(
+        snapshot: await _refreshConnections(),
+        message: remoteStorageMessage(error),
+      );
+    } finally {
+      candidate?.close();
+    }
+
+    final snapshot = await _saveConnections(
+      _connections.copyWith(
+        companionBaseUrl: endpoint,
+        companionAccessToken: token,
+      ),
+    );
     return ConnectionActionResult(
       snapshot: snapshot,
-      message: opened ? null : 'Could not open $providerName files',
+      message: 'Storage companion connected',
     );
   }
 
-  Future<ConnectionActionResult> _openSyncthingApp() {
-    return _openProviderApp(
-      CardImageProvider.syncthing,
-      providerName: 'Syncthing',
-    );
-  }
-
-  Future<ConnectionActionResult> _openProtonDriveApp() {
-    return _openProviderApp(
-      CardImageProvider.protonDrive,
-      providerName: 'Proton Drive',
-    );
-  }
-
-  Future<ConnectionActionResult> _openProviderApp(
-    CardImageProvider provider, {
-    required String providerName,
-  }) async {
-    final opened = await ExternalImageBridge.openProviderApp(provider);
-    final snapshot = await _refreshConnections();
-    return ConnectionActionResult(
-      snapshot: snapshot,
-      message: opened ? null : 'Could not open $providerName',
-    );
-  }
-
-  void _updateSyncthingFolderUri(String folderUri) {
-    unawaited(
-      _saveConnections(_connections.copyWith(syncthingFolderUri: folderUri)),
-    );
-  }
-
-  void _markProtonDriveUsed() {
-    if (_connections.protonDriveConnected) {
+  void _replaceRemoteStorage(WalletConnections connections) {
+    final nextKey =
+        connections.companionConfigured
+            ? '${connections.companionBaseUrl}\u0000'
+                '${connections.companionAccessToken}'
+            : null;
+    if (nextKey == _remoteStorageKey) {
       return;
     }
-    unawaited(
-      _saveConnections(_connections.copyWith(protonDriveConnected: true)),
-    );
+    _remoteStorage?.close();
+    _remoteStorage = null;
+    _remoteStorageKey = nextKey;
+    if (nextKey == null) {
+      return;
+    }
+    try {
+      _remoteStorage = CompanionStorageClient(
+        baseUrl: connections.companionBaseUrl!,
+        accessToken: connections.companionAccessToken!,
+        allowInsecureHttp: kDebugMode,
+      );
+    } on FormatException {
+      _remoteStorage = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _remoteStorage?.close();
+    super.dispose();
   }
 
   Future<void> _openConnectionsSheet() async {
@@ -591,8 +785,6 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
             onSetupProtonDrive: _setupProtonDriveConnection,
             onShowSyncthingFiles: _showSyncthingFiles,
             onShowProtonDriveFiles: _showProtonDriveFiles,
-            onOpenSyncthingApp: _openSyncthingApp,
-            onOpenProtonDriveApp: _openProtonDriveApp,
             onDeleteSyncthing: _deleteSyncthingConnection,
             onDeleteProtonDrive: _deleteProtonDriveConnection,
           ),
@@ -602,47 +794,48 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      key: _scaffoldKey,
-      appBar: WalletTopBar(
-        onMenuPressed: () => _scaffoldKey.currentState?.openDrawer(),
-        onSettingsPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
-      ),
-      drawer: WalletMenuDrawer(
-        connections: _connections,
-        syncthingAvailable: _syncthingAvailable,
-        protonDriveAvailable: _protonDriveAvailable,
-        onClose: () => Navigator.of(context).pop(),
-        onConnectionsPressed: _openConnectionsSheet,
-      ),
-      endDrawer: WalletSettingsDrawer(
-        connections: _connections,
-        syncthingAvailable: _syncthingAvailable,
-        protonDriveAvailable: _protonDriveAvailable,
-        onClose: () => Navigator.of(context).pop(),
-        onConnectionsPressed: _openConnectionsSheet,
-      ),
-      body: WalletDashboard(
-        pickCardImage: widget.pickCardImage ?? pickCardImageFromCamera,
-        cardStore: widget.cardStore ?? const WalletCardStore(),
-        syncthingFolderUri: _connections.syncthingFolderUri,
-        onSyncthingFolderPicked: _updateSyncthingFolderUri,
-        onProtonDriveUsed: _markProtonDriveUsed,
-        section1Open: _section1Open,
-        section2Open: _section2Open,
-        section3Open: _section3Open,
-        onSection1Toggle:
-            () => setState(() {
-              _section1Open = !_section1Open;
-            }),
-        onSection2Toggle:
-            () => setState(() {
-              _section2Open = !_section2Open;
-            }),
-        onSection3Toggle:
-            () => setState(() {
-              _section3Open = !_section3Open;
-            }),
+    return RemoteStorageScope(
+      storage: _remoteStorage,
+      child: Scaffold(
+        key: _scaffoldKey,
+        appBar: WalletTopBar(
+          onMenuPressed: () => _scaffoldKey.currentState?.openDrawer(),
+          onSettingsPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+        ),
+        drawer: WalletMenuDrawer(
+          connections: _connections,
+          syncthingAvailable: _syncthingAvailable,
+          protonDriveAvailable: _protonDriveAvailable,
+          onClose: () => Navigator.of(context).pop(),
+          onConnectionsPressed: _openConnectionsSheet,
+        ),
+        endDrawer: WalletSettingsDrawer(
+          connections: _connections,
+          syncthingAvailable: _syncthingAvailable,
+          protonDriveAvailable: _protonDriveAvailable,
+          onClose: () => Navigator.of(context).pop(),
+          onConnectionsPressed: _openConnectionsSheet,
+        ),
+        body: WalletDashboard(
+          pickCardImage: widget.pickCardImage ?? pickCardImageFromCamera,
+          cardStore: widget.cardStore ?? const WalletCardStore(),
+          remoteStorage: _remoteStorage,
+          section1Open: _section1Open,
+          section2Open: _section2Open,
+          section3Open: _section3Open,
+          onSection1Toggle:
+              () => setState(() {
+                _section1Open = !_section1Open;
+              }),
+          onSection2Toggle:
+              () => setState(() {
+                _section2Open = !_section2Open;
+              }),
+          onSection3Toggle:
+              () => setState(() {
+                _section3Open = !_section3Open;
+              }),
+        ),
       ),
     );
   }
@@ -717,17 +910,13 @@ class WalletDashboard extends StatefulWidget {
     required this.onSection2Toggle,
     required this.onSection3Toggle,
     required this.cardStore,
-    required this.syncthingFolderUri,
-    required this.onSyncthingFolderPicked,
-    required this.onProtonDriveUsed,
+    required this.remoteStorage,
     super.key,
   });
 
   final PickCardImage pickCardImage;
   final WalletCardStore cardStore;
-  final String? syncthingFolderUri;
-  final ValueChanged<String> onSyncthingFolderPicked;
-  final VoidCallback onProtonDriveUsed;
+  final RemoteStorage? remoteStorage;
   final bool section1Open;
   final bool section2Open;
   final bool section3Open;
@@ -794,13 +983,14 @@ class _WalletDashboardState extends State<WalletDashboard> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder:
-          (context) => AddCardSheet(
-            bundle: bundle,
-            pickCardImage: widget.pickCardImage,
-            syncthingFolderUri: widget.syncthingFolderUri,
-            onSyncthingFolderPicked: widget.onSyncthingFolderPicked,
-            onProtonDriveUsed: widget.onProtonDriveUsed,
-            onSave: _insertCard,
+          (context) => RemoteStorageScope(
+            storage: widget.remoteStorage,
+            child: AddCardSheet(
+              bundle: bundle,
+              pickCardImage: widget.pickCardImage,
+              remoteStorage: widget.remoteStorage,
+              onSave: _insertCard,
+            ),
           ),
     );
   }
@@ -888,14 +1078,17 @@ class _WalletDashboardState extends State<WalletDashboard> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder:
-          (context) => CardDetailSheet(
-            card: card,
-            template: template,
-            onSetMainImage: _setMainImage,
-            onEdit: (currentCard) {
-              Navigator.of(context).pop();
-              _editCard(currentCard, template);
-            },
+          (context) => RemoteStorageScope(
+            storage: widget.remoteStorage,
+            child: CardDetailSheet(
+              card: card,
+              template: template,
+              onSetMainImage: _setMainImage,
+              onEdit: (currentCard) {
+                Navigator.of(context).pop();
+                _editCard(currentCard, template);
+              },
+            ),
           ),
     );
   }
@@ -1238,6 +1431,7 @@ class _CardDetailSheetState extends State<CardDetailSheet> {
   }
 
   void _previewImage(CardImageRef image) {
+    final storage = RemoteStorageScope.maybeOf(context);
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1247,16 +1441,19 @@ class _CardDetailSheetState extends State<CardDetailSheet> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder:
-          (sheetContext) => CardImagePreviewSheet(
-            card: _card,
-            image: image,
-            onSetMainImage: () {
-              final updatedCard = widget.onSetMainImage(_card, image);
-              if (mounted) {
-                setState(() => _card = updatedCard);
-              }
-              return updatedCard;
-            },
+          (sheetContext) => RemoteStorageScope(
+            storage: storage,
+            child: CardImagePreviewSheet(
+              card: _card,
+              image: image,
+              onSetMainImage: () {
+                final updatedCard = widget.onSetMainImage(_card, image);
+                if (mounted) {
+                  setState(() => _card = updatedCard);
+                }
+                return updatedCard;
+              },
+            ),
           ),
     );
   }
@@ -1615,10 +1812,15 @@ class _CardImagePreviewSheetState extends State<CardImagePreviewSheet> {
 }
 
 Future<void> showCardImageZoom(BuildContext context, CardImageRef image) {
+  final storage = RemoteStorageScope.maybeOf(context);
   return Navigator.of(context, rootNavigator: true).push<void>(
     MaterialPageRoute(
       fullscreenDialog: true,
-      builder: (context) => CardImageZoomView(image: image),
+      builder:
+          (context) => RemoteStorageScope(
+            storage: storage,
+            child: CardImageZoomView(image: image),
+          ),
     ),
   );
 }
@@ -2258,9 +2460,9 @@ String unavailableExternalSourceMessage(AddCardSource source) {
   return switch (source) {
     AddCardSource.image => '',
     AddCardSource.syncthing =>
-      'Syncthing is not installed on this device. Install Syncthing-Fork and sync a local folder first.',
+      'Connect Akator to the host storage companion before browsing Syncthing.',
     AddCardSource.protonDrive =>
-      'Proton Drive is not installed on this device. Install Proton Drive and sign in, then try again.',
+      'Connect Akator to the host storage companion before browsing Proton Drive.',
   };
 }
 
@@ -2277,18 +2479,14 @@ class AddCardSheet extends StatefulWidget {
     required this.bundle,
     required this.pickCardImage,
     required this.onSave,
-    this.syncthingFolderUri,
-    this.onSyncthingFolderPicked,
-    this.onProtonDriveUsed,
+    this.remoteStorage,
     super.key,
   });
 
   final WalletCardBundle bundle;
   final PickCardImage pickCardImage;
   final ValueChanged<WalletCard> onSave;
-  final String? syncthingFolderUri;
-  final ValueChanged<String>? onSyncthingFolderPicked;
-  final VoidCallback? onProtonDriveUsed;
+  final RemoteStorage? remoteStorage;
 
   @override
   State<AddCardSheet> createState() => _AddCardSheetState();
@@ -2301,14 +2499,12 @@ class _AddCardSheetState extends State<AddCardSheet> {
   final List<CardImageRef> _images = [];
   CardImageRef? _selectedImage;
   CardImageRef? _mainImage;
-  String? _syncthingFolderUri;
   String? _sourceError;
   bool _pickingImage = false;
 
   @override
   void initState() {
     super.initState();
-    _syncthingFolderUri = widget.syncthingFolderUri;
     _template = widget.bundle.templates.first;
     _controllers = controllersForTemplate(
       _template,
@@ -2368,38 +2564,23 @@ class _AddCardSheetState extends State<AddCardSheet> {
       if (source == AddCardSource.image) {
         image = await widget.pickCardImage();
       } else {
-        final providerAvailable = await ExternalImageBridge.isProviderAvailable(
-          imageProviderForSource(source),
-        );
-        if (!mounted) {
-          return;
-        }
-
-        if (!providerAvailable) {
+        final storage = widget.remoteStorage;
+        if (storage == null) {
           _sourceError = unavailableExternalSourceMessage(source);
         } else {
-          var folderUri = _syncthingFolderUri;
-          if (source == AddCardSource.syncthing && folderUri == null) {
-            folderUri = await ExternalImageBridge.pickSyncthingFolder();
-            if (!mounted) {
-              return;
-            }
-            _syncthingFolderUri = folderUri;
-            if (folderUri != null) {
-              widget.onSyncthingFolderPicked?.call(folderUri);
-            }
-          }
-
-          if (source != AddCardSource.syncthing || folderUri != null) {
-            image = await pickCardImageFromExternal(
-              source: source,
-              folderUri: folderUri,
-            );
-          }
+          image = await pickCardImageFromRemote(
+            context: context,
+            source: source,
+            storage: storage,
+          );
         }
       }
+    } on RemoteStorageException catch (error) {
+      _sourceError = remoteStorageMessage(error);
     } on PlatformException catch (error) {
-      _sourceError = error.message ?? 'Could not open external storage';
+      _sourceError = error.message ?? 'Could not crop the remote image';
+    } on FileSystemException {
+      _sourceError = 'Could not prepare the remote image';
     }
 
     if (!mounted) {
@@ -2410,9 +2591,6 @@ class _AddCardSheetState extends State<AddCardSheet> {
       _pickingImage = false;
       if (image == null || _images.length >= 4) {
         return;
-      }
-      if (source == AddCardSource.protonDrive) {
-        widget.onProtonDriveUsed?.call();
       }
       _images.add(image);
       _selectedImage ??= image;
@@ -2608,7 +2786,7 @@ class AddCardSourcePicker extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         Text(
-          'External storage',
+          'Host storage',
           style: WalletStyles.body1Medium(color: AkatorColors.textNorm),
         ),
         const SizedBox(height: 8),
@@ -2616,7 +2794,7 @@ class AddCardSourcePicker extends StatelessWidget {
           key: const ValueKey('add-card-path-syncthing'),
           icon: Icons.sync_rounded,
           title: 'Syncthing',
-          detail: 'Choose a synced folder and link images from it',
+          detail: 'Browse the wallet folder synced by the host daemon',
           onPressed: () => onSelected(AddCardSource.syncthing),
         ),
         const SizedBox(height: 8),
@@ -2624,7 +2802,7 @@ class AddCardSourcePicker extends StatelessWidget {
           key: const ValueKey('add-card-path-proton-drive'),
           icon: Icons.cloud_outlined,
           title: 'Proton Drive',
-          detail: 'Browse images through the Android file picker',
+          detail: 'Browse encrypted cloud files through the host companion',
           onPressed: () => onSelected(AddCardSource.protonDrive),
         ),
       ],
@@ -3125,8 +3303,8 @@ class ExternalStorageHint extends StatelessWidget {
   Widget build(BuildContext context) {
     final text =
         source == AddCardSource.syncthing
-            ? 'Choose your Syncthing folder once, then pick images from Android storage.'
-            : 'Pick images through Android storage. Proton Drive appears here when its app is installed and signed in.';
+            ? 'Browse the wallet directory managed by Syncthing on your host.'
+            : 'Browse Proton Drive through the authenticated host companion.';
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -4034,8 +4212,8 @@ class WalletMenuDrawer extends StatelessWidget {
                     key: const ValueKey('drawer-connection-syncthing'),
                     title: 'Syncthing',
                     state: connectionStateFor(
+                      configured: connections.companionConfigured,
                       available: syncthingAvailable,
-                      connected: connections.syncthingConnected,
                     ),
                     onPressed: () {
                       Navigator.of(context).pop();
@@ -4051,8 +4229,8 @@ class WalletMenuDrawer extends StatelessWidget {
                     key: const ValueKey('drawer-connection-proton-drive'),
                     title: 'Proton Drive',
                     state: connectionStateFor(
+                      configured: connections.companionConfigured,
                       available: protonDriveAvailable,
-                      connected: connections.protonDriveConnected,
                     ),
                     onPressed: () {
                       Navigator.of(context).pop();
@@ -4138,8 +4316,8 @@ class WalletSettingsDrawer extends StatelessWidget {
                   key: const ValueKey('settings-connection-syncthing'),
                   title: 'Syncthing',
                   state: connectionStateFor(
+                    configured: connections.companionConfigured,
                     available: syncthingAvailable,
-                    connected: connections.syncthingConnected,
                   ),
                   onPressed: () {
                     Navigator.of(context).pop();
@@ -4155,8 +4333,8 @@ class WalletSettingsDrawer extends StatelessWidget {
                   key: const ValueKey('settings-connection-proton-drive'),
                   title: 'Proton Drive',
                   state: connectionStateFor(
+                    configured: connections.companionConfigured,
                     available: protonDriveAvailable,
-                    connected: connections.protonDriveConnected,
                   ),
                   onPressed: () {
                     Navigator.of(context).pop();
@@ -4189,6 +4367,98 @@ class WalletSettingsDrawer extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class CompanionConnectionInput {
+  const CompanionConnectionInput({required this.endpoint, required this.token});
+
+  final String endpoint;
+  final String token;
+}
+
+class CompanionConnectionDialog extends StatefulWidget {
+  const CompanionConnectionDialog({
+    required this.initialEndpoint,
+    required this.initialToken,
+    super.key,
+  });
+
+  final String initialEndpoint;
+  final String initialToken;
+
+  @override
+  State<CompanionConnectionDialog> createState() =>
+      _CompanionConnectionDialogState();
+}
+
+class _CompanionConnectionDialogState extends State<CompanionConnectionDialog> {
+  late final TextEditingController _endpointController;
+  late final TextEditingController _tokenController;
+
+  @override
+  void initState() {
+    super.initState();
+    _endpointController = TextEditingController(text: widget.initialEndpoint);
+    _tokenController = TextEditingController(text: widget.initialToken);
+  }
+
+  @override
+  void dispose() {
+    _endpointController.dispose();
+    _tokenController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    Navigator.of(context).pop(
+      CompanionConnectionInput(
+        endpoint: _endpointController.text.trim(),
+        token: _tokenController.text.trim(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Storage companion'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              key: const ValueKey('companion-base-url'),
+              controller: _endpointController,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Companion URL',
+                hintText: 'https://wallet-host.example:8787',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const ValueKey('companion-access-token'),
+              controller: _tokenController,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              onSubmitted: (_) => _submit(),
+              decoration: const InputDecoration(labelText: 'Access token'),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Test and save')),
+      ],
     );
   }
 }
@@ -4227,22 +4497,22 @@ class WalletConnectionView {
 }
 
 WalletConnectionView connectionStateFor({
+  required bool configured,
   required bool available,
-  required bool connected,
 }) {
-  if (!available) {
+  if (!configured) {
     return const WalletConnectionView(
-      label: 'Not installed',
-      detail: 'Set up connection',
+      label: 'Not configured',
+      detail: 'Set up host companion',
       color: AkatorColors.danger,
       connected: false,
     );
   }
-  if (!connected) {
+  if (!available) {
     return const WalletConnectionView(
-      label: 'Disconnected',
-      detail: 'Set up connection',
-      color: AkatorColors.textHint,
+      label: 'Unavailable',
+      detail: 'Check host companion',
+      color: AkatorColors.danger,
       connected: false,
     );
   }
@@ -4263,8 +4533,6 @@ class ConnectionsSheet extends StatefulWidget {
     required this.onSetupProtonDrive,
     required this.onShowSyncthingFiles,
     required this.onShowProtonDriveFiles,
-    required this.onOpenSyncthingApp,
-    required this.onOpenProtonDriveApp,
     required this.onDeleteSyncthing,
     required this.onDeleteProtonDrive,
     super.key,
@@ -4275,8 +4543,6 @@ class ConnectionsSheet extends StatefulWidget {
   final Future<ConnectionActionResult> Function() onSetupProtonDrive;
   final Future<ConnectionActionResult> Function() onShowSyncthingFiles;
   final Future<ConnectionActionResult> Function() onShowProtonDriveFiles;
-  final Future<ConnectionActionResult> Function() onOpenSyncthingApp;
-  final Future<ConnectionActionResult> Function() onOpenProtonDriveApp;
   final Future<ConnectionActionResult> Function() onDeleteSyncthing;
   final Future<ConnectionActionResult> Function() onDeleteProtonDrive;
 
@@ -4340,12 +4606,12 @@ class _ConnectionsSheetState extends State<ConnectionsSheet> {
   WalletConnectionView _stateFor(ConnectionSettingsTarget target) {
     return switch (target) {
       ConnectionSettingsTarget.syncthing => connectionStateFor(
+        configured: _snapshot.connections.companionConfigured,
         available: _snapshot.syncthingAvailable,
-        connected: _snapshot.connections.syncthingConnected,
       ),
       ConnectionSettingsTarget.protonDrive => connectionStateFor(
+        configured: _snapshot.connections.companionConfigured,
         available: _snapshot.protonDriveAvailable,
-        connected: _snapshot.connections.protonDriveConnected,
       ),
     };
   }
@@ -4365,15 +4631,6 @@ class _ConnectionsSheetState extends State<ConnectionsSheet> {
     return switch (target) {
       ConnectionSettingsTarget.syncthing => widget.onShowSyncthingFiles,
       ConnectionSettingsTarget.protonDrive => widget.onShowProtonDriveFiles,
-    };
-  }
-
-  Future<ConnectionActionResult> Function() _openProviderAppAction(
-    ConnectionSettingsTarget target,
-  ) {
-    return switch (target) {
-      ConnectionSettingsTarget.syncthing => widget.onOpenSyncthingApp,
-      ConnectionSettingsTarget.protonDrive => widget.onOpenProtonDriveApp,
     };
   }
 
@@ -4431,12 +4688,11 @@ class _ConnectionsSheetState extends State<ConnectionsSheet> {
     final providerName = isSyncthing ? 'Syncthing' : 'Proton Drive';
     final providerText =
         isSyncthing
-            ? 'Akator stores the selected Android folder permission. '
-                'Device pairing, folder sync rules, versioning and network '
-                'state stay in Syncthing-Fork.'
-            : 'Akator stores only whether Proton Drive is enabled here. '
-                'Sign-in, cloud folders, offline files and account settings '
-                'stay in Proton Drive.';
+            ? 'Akator accesses a host folder managed by official Syncthing. '
+                'Device pairing, folder rules, versioning and network state '
+                'stay in Syncthing on the companion host.'
+            : 'Akator asks the companion host to perform explicit Proton '
+                'Drive CLI operations. Proton credentials stay on that host.';
 
     return SizedBox(
       height: MediaQuery.sizeOf(context).height * 0.76,
@@ -4492,22 +4748,11 @@ class _ConnectionsSheetState extends State<ConnectionsSheet> {
                                     : () => _run(_showFilesAction(target)),
                             child: const Text('Show files'),
                           ),
-                          FilledButton.tonal(
+                          OutlinedButton(
                             onPressed:
-                                _busy
-                                    ? null
-                                    : () =>
-                                        _run(_openProviderAppAction(target)),
-                            child: Text('Open $providerName'),
+                                _busy ? null : () => _run(_setupAction(target)),
+                            child: const Text('Test connection'),
                           ),
-                          if (isSyncthing)
-                            OutlinedButton(
-                              onPressed:
-                                  _busy
-                                      ? null
-                                      : () => _run(_setupAction(target)),
-                              child: const Text('Change folder'),
-                            ),
                           OutlinedButton(
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AkatorColors.danger,
@@ -4559,12 +4804,12 @@ class _ConnectionsSheetState extends State<ConnectionsSheet> {
     }
 
     final syncthingState = connectionStateFor(
+      configured: _snapshot.connections.companionConfigured,
       available: _snapshot.syncthingAvailable,
-      connected: _snapshot.connections.syncthingConnected,
     );
     final protonDriveState = connectionStateFor(
+      configured: _snapshot.connections.companionConfigured,
       available: _snapshot.protonDriveAvailable,
-      connected: _snapshot.connections.protonDriveConnected,
     );
 
     return SizedBox(
@@ -4593,7 +4838,8 @@ class _ConnectionsSheetState extends State<ConnectionsSheet> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Akator stores provider status and folder permission only.',
+              'Akator connects to provider tooling on a companion host. '
+              'Provider credentials stay on that host.',
               style: WalletStyles.captionRegular(color: AkatorColors.textWeak),
             ),
             const SizedBox(height: 14),
@@ -4605,7 +4851,8 @@ class _ConnectionsSheetState extends State<ConnectionsSheet> {
                     ConnectionSetupTile(
                       title: 'Syncthing',
                       detail:
-                          'Choose a synced Android folder. No login is stored.',
+                          'Browse the wallet folder managed by Syncthing on '
+                          'the host.',
                       icon: Icons.cloud_outlined,
                       state: syncthingState,
                       busy: _busy,
@@ -4619,7 +4866,8 @@ class _ConnectionsSheetState extends State<ConnectionsSheet> {
                     ConnectionSetupTile(
                       title: 'Proton Drive',
                       detail:
-                          'Use the Proton Drive app. Credentials stay there.',
+                          'Use explicit encrypted Proton Drive operations on '
+                          'the host.',
                       icon: Icons.cloud_outlined,
                       state: protonDriveState,
                       busy: _busy,
