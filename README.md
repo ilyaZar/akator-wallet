@@ -12,6 +12,8 @@ fvm flutter pub get
 fvm flutter run -d emulator-5554
 ```
 
+The Flutter SDK version is defined in `.fvmrc`; FVM and CI both use that pin.
+
 Android SDK, AVD, and Flutter cache state live under:
 
 ```text

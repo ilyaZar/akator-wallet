@@ -214,11 +214,10 @@ class CardTemplate {
     return CardTemplate(
       type: WalletCardType.fromStorageKey(json['type'] as String),
       label: json['label'] as String,
-      fields:
-          (json['fields'] as List<dynamic>)
-              .cast<Map<String, dynamic>>()
-              .map(CardFieldTemplate.fromJson)
-              .toList(),
+      fields: (json['fields'] as List<dynamic>)
+          .cast<Map<String, dynamic>>()
+          .map(CardFieldTemplate.fromJson)
+          .toList(),
     );
   }
 
@@ -375,12 +374,12 @@ class WalletConnections {
     bool clearCompanion = false,
   }) {
     return WalletConnections(
-      companionBaseUrl:
-          clearCompanion ? null : companionBaseUrl ?? this.companionBaseUrl,
-      companionAccessToken:
-          clearCompanion
-              ? null
-              : companionAccessToken ?? this.companionAccessToken,
+      companionBaseUrl: clearCompanion
+          ? null
+          : companionBaseUrl ?? this.companionBaseUrl,
+      companionAccessToken: clearCompanion
+          ? null
+          : companionAccessToken ?? this.companionAccessToken,
       legacySyncthingFolderUri: legacySyncthingFolderUri,
     );
   }
@@ -398,7 +397,9 @@ class WalletConnections {
 class WalletConnectionStore {
   const WalletConnectionStore({
     FlutterSecureStorage secureStorage = const FlutterSecureStorage(),
-  }) : _secureStorage = secureStorage;
+  }) : this._(secureStorage);
+
+  const WalletConnectionStore._(this._secureStorage);
 
   static const _connectionsStorageKey = 'akator_wallet_connections_v1';
 
@@ -434,8 +435,9 @@ class WalletCardStore {
   const WalletCardStore({
     FlutterSecureStorage secureStorage = const FlutterSecureStorage(),
     bool loadSavedCards = true,
-  }) : _secureStorage = secureStorage,
-       _loadSavedCards = loadSavedCards;
+  }) : this._(secureStorage, loadSavedCards);
+
+  const WalletCardStore._(this._secureStorage, this._loadSavedCards);
 
   static const _cardsStorageKey = 'akator_wallet_cards_v1';
 
@@ -449,23 +451,20 @@ class WalletCardStore {
     ]);
 
     final templatesJson = jsonDecode(payloads[0]) as Map<String, dynamic>;
-    final cardsPayload =
-        _loadSavedCards
-            ? await _readSavedCardsPayload() ?? payloads[1]
-            : payloads[1];
+    final cardsPayload = _loadSavedCards
+        ? await _readSavedCardsPayload() ?? payloads[1]
+        : payloads[1];
     final cardsJson = jsonDecode(cardsPayload) as Map<String, dynamic>;
 
     return WalletCardBundle(
-      templates:
-          (templatesJson['templates'] as List<dynamic>)
-              .cast<Map<String, dynamic>>()
-              .map(CardTemplate.fromJson)
-              .toList(),
-      cards:
-          (cardsJson['cards'] as List<dynamic>)
-              .cast<Map<String, dynamic>>()
-              .map(WalletCard.fromJson)
-              .toList(),
+      templates: (templatesJson['templates'] as List<dynamic>)
+          .cast<Map<String, dynamic>>()
+          .map(CardTemplate.fromJson)
+          .toList(),
+      cards: (cardsJson['cards'] as List<dynamic>)
+          .cast<Map<String, dynamic>>()
+          .map(WalletCard.fromJson)
+          .toList(),
     );
   }
 

@@ -123,13 +123,14 @@ void main() {
       tester,
       find.byKey(const ValueKey('zoom-draft-main-image')),
     );
+    await tester.pumpAndSettle();
     expect(find.byType(CardImageZoomView), findsOneWidget);
     expect(
       find.byKey(const ValueKey('zoom-image-assets/cards/credit_card_2.png')),
       findsOneWidget,
     );
     await tester.tap(find.byTooltip('Close zoom'));
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
 
     await tapVisibleBounded(
       tester,
