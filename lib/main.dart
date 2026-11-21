@@ -2923,7 +2923,7 @@ class AddCardDraftForm extends StatelessWidget {
             Expanded(
               child: DropdownButtonFormField<WalletCardType>(
                 key: const ValueKey('add-card-type-selector'),
-                value: template.type,
+                initialValue: template.type,
                 decoration: const InputDecoration(
                   labelText: 'Card type',
                   border: OutlineInputBorder(),
@@ -5396,11 +5396,9 @@ class SettingsPanel extends StatelessWidget {
             style: WalletStyles.subheadline(color: AkatorColors.textNorm),
           ),
         ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: AkatorColors.backgroundSecondary,
-            borderRadius: BorderRadius.circular(8),
-          ),
+        Material(
+          color: AkatorColors.backgroundSecondary,
+          borderRadius: BorderRadius.circular(8),
           child: Column(
             children: [
               for (var i = 0; i < children.length; i++) ...[
